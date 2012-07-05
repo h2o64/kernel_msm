@@ -1121,6 +1121,8 @@ static struct regulator *create_regulator(struct regulator_dev *rdev,
 	list_add(&regulator->list, &rdev->consumer_list);
 
 	if (dev) {
+		regulator->dev = dev;
+
 		/* create a 'requested_microamps_name' sysfs entry */
 		size = scnprintf(buf, REG_STR_SIZE,
 				 "microamps_requested_%s-%s",
@@ -1422,10 +1424,8 @@ void regulator_put(struct regulator *regulator)
 	debugfs_remove_recursive(regulator->debugfs);
 
 	/* remove any sysfs entries */
-	if (regulator->dev) {
+	if (regulator->dev)
 		sysfs_remove_link(&rdev->dev.kobj, regulator->supply_name);
-		device_remove_file(regulator->dev, &regulator->dev_attr);
-		kfree(regulator->dev_attr.attr.name);
 	}
 	kfree(regulator->supply_name);
 	list_del(&regulator->list);
