@@ -1856,6 +1856,10 @@ config SYS_SUPPORTS_HUGETLBFS
        def_bool y
        depends on ARM_LPAE
 
+config HAVE_ARCH_TRANSPARENT_HUGEPAGE
+       def_bool y
+       depends on ARM_LPAE
+
 source "mm/Kconfig"
 
 config ARCH_MEMORY_PROBE
