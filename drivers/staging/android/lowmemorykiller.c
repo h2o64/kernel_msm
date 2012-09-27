@@ -30,6 +30,7 @@
  *
  */
 
+#define REALLY_WANT_TRACEPOINTS
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/module.h>
