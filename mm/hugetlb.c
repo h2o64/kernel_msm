@@ -3078,30 +3078,24 @@ static int vma_shareable(struct vm_area_struct *vma, unsigned long addr)
 }
 
 /*
- * Search for a shareable pmd page for hugetlb. In any case calls pmd_alloc()
- * and returns the corresponding pte. While this is not necessary for the
- * !shared pmd case because we can allocate the pmd later as well, it makes the
- * code much cleaner. pmd allocation is essential for the shared case because
- * pud has to be populated inside the same i_mmap_mutex section - otherwise
- * racing tasks could either miss the sharing (see huge_pte_offset) or select a
- * bad pmd for sharing.
+ * search for a shareable pmd page for hugetlb.
  */
-pte_t *huge_pmd_share(struct mm_struct *mm, unsigned long addr, pud_t *pud)
+static void huge_pmd_share(struct mm_struct *mm, unsigned long addr, pud_t *pud)
 {
 	struct vm_area_struct *vma = find_vma(mm, addr);
 	struct address_space *mapping = vma->vm_file->f_mapping;
 	pgoff_t idx = ((addr - vma->vm_start) >> PAGE_SHIFT) +
 			vma->vm_pgoff;
+	struct prio_tree_iter iter;
 	struct vm_area_struct *svma;
 	unsigned long saddr;
 	pte_t *spte = NULL;
-	pte_t *pte;
 
 	if (!vma_shareable(vma, addr))
-		return (pte_t *)pmd_alloc(mm, pud, addr);
+		return;
 
 	mutex_lock(&mapping->i_mmap_mutex);
-	vma_interval_tree_foreach(svma, &mapping->i_mmap, idx, idx) {
+	vma_prio_tree_foreach(svma, &iter, &mapping->i_mmap, idx, idx) {
 		if (svma == vma)
 			continue;
 
@@ -3120,15 +3114,12 @@ pte_t *huge_pmd_share(struct mm_struct *mm, unsigned long addr, pud_t *pud)
 
 	spin_lock(&mm->page_table_lock);
 	if (pud_none(*pud))
-		pud_populate(mm, pud,
-				(pmd_t *)((unsigned long)spte & PAGE_MASK));
+		pud_populate(mm, pud, (pmd_t *)((unsigned long)spte & PAGE_MASK));
 	else
 		put_page(virt_to_page(spte));
 	spin_unlock(&mm->page_table_lock);
 out:
-	pte = (pte_t *)pmd_alloc(mm, pud, addr);
 	mutex_unlock(&mapping->i_mmap_mutex);
-	return pte;
 }
 
 /*
