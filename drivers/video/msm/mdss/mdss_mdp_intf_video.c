@@ -24,6 +24,8 @@
 #include "mdss_debug.h"
 #include "mdss_mdp_trace.h"
 
+#include "mdss_timeout.h"
+
 /* wait for at least 2 vsyncs for lowest refresh rate (24hz) */
 #define VSYNC_TIMEOUT_US 100000
 
@@ -438,6 +440,8 @@ static int mdss_mdp_video_wait4comp(struct mdss_mdp_ctl *ctl, void *arg)
 {
 	struct mdss_mdp_video_ctx *ctx;
 	int rc;
+	static int timeout_occurred;
+	u32 prev_vsync_cnt;
 
 	ctx = (struct mdss_mdp_video_ctx *) ctl->priv_data;
 	if (!ctx) {
@@ -451,15 +455,26 @@ static int mdss_mdp_video_wait4comp(struct mdss_mdp_ctl *ctl, void *arg)
 		rc = mdss_mdp_video_pollwait(ctl);
 	} else {
 		mutex_unlock(&ctl->lock);
+		prev_vsync_cnt = ctl->vsync_cnt;
 		rc = wait_for_completion_timeout(&ctx->vsync_comp,
 				usecs_to_jiffies(VSYNC_TIMEOUT_US));
 		mutex_lock(&ctl->lock);
 		if (rc == 0) {
+			pr_err("%s: TIMEOUT (vsync_cnt: prev: %u cur: %u)\n",
+				__func__, prev_vsync_cnt, ctl->vsync_cnt);
+			timeout_occurred = 1;
+			mdss_timeout_dump(ctl->mfd, __func__);
+
 			pr_warn("vsync wait timeout %d, fallback to poll mode\n",
 					ctl->num);
 			ctx->polling_en++;
 			rc = mdss_mdp_video_pollwait(ctl);
 		} else {
+			if (timeout_occurred)
+				pr_info("%s: recovered from previous timeout\n",
+					__func__);
+			timeout_occurred = 0;
+
 			rc = 0;
 		}
 	}
@@ -804,6 +819,16 @@ error:
 	return ret;
 }
 
+void mdss_mdp_video_dump_ctx(struct mdss_mdp_ctl *ctl)
+{
+	struct mdss_mdp_video_ctx *ctx = ctl->priv_data;
+
+	MDSS_TIMEOUT_LOG("timegen_en=%u\n", ctx->timegen_en);
+	MDSS_TIMEOUT_LOG("polling_en=%u\n", ctx->polling_en);
+	MDSS_TIMEOUT_LOG("poll_cnt=%u\n", ctx->poll_cnt);
+	MDSS_TIMEOUT_LOG("wait_pending=%d\n", ctx->wait_pending);
+}
+
 int mdss_mdp_video_start(struct mdss_mdp_ctl *ctl)
 {
 	struct mdss_data_type *mdata;
@@ -889,6 +914,7 @@ int mdss_mdp_video_start(struct mdss_mdp_ctl *ctl)
 	ctl->add_vsync_handler = mdss_mdp_video_add_vsync_handler;
 	ctl->remove_vsync_handler = mdss_mdp_video_remove_vsync_handler;
 	ctl->config_fps_fnc = mdss_mdp_video_config_fps;
+	ctl->ctx_dump_fnc = mdss_mdp_video_dump_ctx;
 
 	return 0;
 }
