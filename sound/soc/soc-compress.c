@@ -627,7 +627,7 @@ static int soc_compr_copy(struct snd_compr_stream *cstream,
 	return ret;
 }
 
-static int sst_compr_set_metadata(struct snd_compr_stream *cstream,
+static int soc_compr_set_metadata(struct snd_compr_stream *cstream,
 				struct snd_compr_metadata *metadata)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
@@ -640,7 +640,7 @@ static int sst_compr_set_metadata(struct snd_compr_stream *cstream,
 	return ret;
 }
 
-static int sst_compr_get_metadata(struct snd_compr_stream *cstream,
+static int soc_compr_get_metadata(struct snd_compr_stream *cstream,
 				struct snd_compr_metadata *metadata)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
@@ -657,8 +657,8 @@ static struct snd_compr_ops soc_compr_ops = {
 	.open		= soc_compr_open,
 	.free		= soc_compr_free,
 	.set_params	= soc_compr_set_params,
-	.set_metadata   = sst_compr_set_metadata,
-	.get_metadata	= sst_compr_get_metadata,
+	.set_metadata   = soc_compr_set_metadata,
+	.get_metadata	= soc_compr_get_metadata,
 	.get_params	= soc_compr_get_params,
 	.trigger	= soc_compr_trigger,
 	.pointer	= soc_compr_pointer,
