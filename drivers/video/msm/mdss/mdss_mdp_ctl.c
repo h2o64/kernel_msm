@@ -318,7 +318,7 @@ static u32 mdss_mdp_perf_calc_pipe_prefill_cmd(struct mdss_mdp_prefill_params
  */
 int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
 	struct mdss_mdp_perf_params *perf, struct mdss_mdp_img_rect *roi,
-	bool apply_fudge)
+	bool apply_fudge, int tune)
 {
 	struct mdss_mdp_mixer *mixer;
 	int fps = DEFAULT_FRAME_RATE;
@@ -345,7 +345,8 @@ int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
 			v_total = pinfo->panel_max_vtotal;
 		} else {
 			fps = mdss_panel_get_framerate(pinfo);
-			v_total = mdss_panel_get_vtotal(pinfo);
+			v_total = mdss_panel_get_vtotal_lcd(pinfo,
++				tune ? &pinfo->lcdc_tune : &pinfo->lcdc);
 		}
 		xres = pinfo->xres;
 		is_fbc = pinfo->fbc.enabled;
@@ -521,7 +522,7 @@ static void mdss_mdp_perf_calc_mixer(struct mdss_mdp_mixer *mixer,
 			continue;
 
 		if (mdss_mdp_perf_calc_pipe(pipe, &tmp, &mixer->roi,
-			apply_fudge))
+			apply_fudge, 0))
 			continue;
 		prefill_bytes += tmp.prefill_bytes;
 		bw_overlap[i] = tmp.bw_overlap;
