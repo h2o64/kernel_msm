@@ -1008,12 +1008,9 @@ free:
 	spin_unlock(&hugetlb_lock);
 
 	/* Free unnecessary surplus pages to the buddy allocator */
-	if (!list_empty(&surplus_list)) {
-		list_for_each_entry_safe(page, tmp, &surplus_list, lru) {
-			list_del(&page->lru);
-			put_page(page);
-		}
-	}
+	list_for_each_entry_safe(page, tmp, &surplus_list, lru)
+		list_del(&page->lru);
+		put_page(page);
 	spin_lock(&hugetlb_lock);
 
 	return ret;
