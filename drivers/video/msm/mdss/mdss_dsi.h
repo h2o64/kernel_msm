@@ -250,6 +250,7 @@ struct mdss_dsi_ctrl_pdata {
 	int (*check_status) (struct mdss_dsi_ctrl_pdata *pdata);
 	int (*cmdlist_commit)(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp);
 	void (*switch_mode) (struct mdss_panel_data *pdata, int mode);
+	int (*cont_splash_on) (struct mdss_panel_data *pdata);
 	struct mdss_panel_data panel_data;
 	struct dss_module_power panel_vregs;
 	unsigned char *ctrl_base;
