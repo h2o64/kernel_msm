@@ -1726,6 +1726,12 @@ static int mdss_panel_parse_dt(struct device_node *np,
 	}
 	panelinfo.panel_supplier = pinfo->supplier;
 
+	pinfo->no_solid_fill =
+		of_property_read_bool(np, "qcom,splash-no-solid-fill");
+	if (pinfo->mipi.mode == DSI_VIDEO_MODE && !pinfo->no_solid_fill)
+		pr_warn("%s: 'No Solid Fill' not set for video mode panel",
+			__func__);
+
 	return 0;
 
 error:
