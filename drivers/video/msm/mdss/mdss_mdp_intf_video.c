@@ -813,6 +813,8 @@ int mdss_mdp_video_reconfigure_splash_done(struct mdss_mdp_ctl *ctl,
 		ret = mdss_mdp_ctl_intf_event(ctl,
 			MDSS_EVENT_CONT_SPLASH_FINISH, NULL);
 	}
+	ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_PANEL_CONT_SPLASH_FINISH,
+				NULL);
 
 error:
 	pdata->panel_info.cont_splash_enabled = 0;
