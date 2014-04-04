@@ -498,8 +498,14 @@ error:
 }
 static int mdss_dsi_panel_cont_splash_on(struct mdss_panel_data *pdata)
 {
+	mdss_dsi_panel_regulator_on(pdata, 1);
+
+	if (pdata->panel_info.type == MIPI_VIDEO_PANEL)
+		mdss_dsi_sw_reset(pdata);
+
 	mmi_panel_notify(MMI_PANEL_EVENT_DISPLAY_ON, NULL);
-	//mdss_dsi_panel_esd(pdata);
+
+	pr_info("%s: Panel continuous splash finished\n", __func__);
 	return 0;
 }
 

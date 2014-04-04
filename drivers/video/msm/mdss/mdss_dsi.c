@@ -1052,6 +1052,10 @@ static int mdss_dsi_event_handler(struct mdss_panel_data *pdata,
 		ctrl_pdata->ctrl_state &= ~CTRL_STATE_MDP_ACTIVE;
 		rc = mdss_dsi_cont_splash_on(pdata);
 		break;
+	case MDSS_EVENT_PANEL_CONT_SPLASH_FINISH:
+		if (ctrl_pdata->cont_splash_on)
+			rc = ctrl_pdata->cont_splash_on(pdata);
+		break;
 	case MDSS_EVENT_PANEL_CLK_CTRL:
 		mdss_dsi_clk_req(ctrl_pdata, (int)arg);
 		break;
