@@ -401,3 +401,5 @@ config USE_USER_ACCESSIBLE_TIMERS
 	  architecture-specific code that will need to be enabled
 	  separately.
 
+config GENERIC_EARLY_IOREMAP
+	bool
