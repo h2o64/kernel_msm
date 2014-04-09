@@ -128,7 +128,6 @@ struct mdss_panel_recovery {
  * @MDSS_EVENT_PANEL_CLK_CTRL:	panel clock control
 				 - 0 clock disable
 				 - 1 clock enable
- * @MDSS_EVENT_ENABLE_PARTIAL_UPDATE: Event to update ROI of the panel.
  * @MDSS_EVENT_DSI_CMDLIST_KOFF: acquire dsi_mdp_busy lock before kickoff.
  * @MDSS_EVENT_DSI_ULPS_CTRL:	Event to configure Ultra Lower Power Saving
  *				mode for the DSI data and clock lanes. The
@@ -139,6 +138,7 @@ struct mdss_panel_recovery {
  *				based on the dsi mode passed as argument.
  *				- 0: update to video mode
  *				- 1: update to command mode
+ * @MDSS_EVENT_ENABLE_HBM:	Enable "High Brightness Mode" feature on panel
  */
 enum mdss_intf_events {
 	MDSS_EVENT_RESET = 1,
@@ -161,6 +161,7 @@ enum mdss_intf_events {
 	MDSS_EVENT_DSI_ULPS_CTRL,
 	MDSS_EVENT_REGISTER_RECOVERY_HANDLER,
 	MDSS_EVENT_DSI_DYNAMIC_SWITCH,
+	MDSS_EVENT_ENABLE_HBM,
 };
 
 struct lcd_panel_info {
@@ -350,6 +351,8 @@ struct mdss_panel_info {
 	u32 partial_update_enabled;
 	struct ion_handle *splash_ihdl;
 	u32 panel_power_on;
+	bool hbm_feature_enabled;
+	bool hbm_state;
 
 	uint32_t panel_dead;
 	bool dynamic_switch_pending;
