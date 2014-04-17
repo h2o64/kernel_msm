@@ -23,7 +23,6 @@
 
 #include <linux/delay.h>
 #include <linux/device.h>
-#include <linux/powersuspend.h>
 #include <linux/freezer.h>
 #include <linux/gpio.h>
 #include <linux/input.h>
@@ -35,6 +34,7 @@
 #include <linux/of_gpio.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/suspend.h>
 #include <linux/uaccess.h>
 #include <linux/workqueue.h>
 #include <linux/akm8963.h>
@@ -71,10 +71,6 @@ struct akm8963_data {
 	struct class		*compass;
 	struct work_struct	work;
 
-#ifdef CONFIG_POWERSUSPEND
-	struct power_suspend	akm_power_suspend;
-#endif
-
 	wait_queue_head_t	drdy_wq;
 	wait_queue_head_t	open_wq;
 
@@ -99,6 +95,8 @@ struct akm8963_data {
 	int	irq;
 	int	rstn;
 	int (*power_LPM)(int on);
+
+	struct notifier_block pm_notifier;
 
 	struct regulator        *sr_1v8;
 	struct regulator        *sr_2v85;
@@ -1448,44 +1446,62 @@ static irqreturn_t akm8963_irq(int irq, void *handle)
 	return IRQ_HANDLED;
 }
 
-#ifdef CONFIG_PM
-#ifdef CONFIG_POWERSUSPEND
-static void akm8963_suspend(struct power_suspend *handler)
+static int akm8963_suspend(struct akm8963_data *akm)
 {
 
 	if (s_akm && (s_akm->power_LPM))
 		s_akm->power_LPM(1);
 
-	dev_info(&s_akm->i2c->dev, "%s: Suspend\n", __func__);
+	dev_info(&akm->i2c->dev, "%s: Suspend\n", __func__);
 
-	disable_irq(s_akm->irq);
+	disable_irq(akm->irq);
 
-	mutex_lock(&s_akm->state_mutex);
-	s_akm->suspend_flag = 1;
-	s_akm->drdy_flag = 0;
-	s_akm->busy_flag = 0;
-	s_akm->active_flag = 0;
-	mutex_unlock(&s_akm->state_mutex);
+	mutex_lock(&akm->state_mutex);
+	akm->suspend_flag = 1;
+	akm->drdy_flag = 0;
+	akm->busy_flag = 0;
+	akm->active_flag = 0;
+	mutex_unlock(&akm->state_mutex);
 
-	wake_up(&s_akm->open_wq);
+	wake_up(&akm->open_wq);
+
+	return 0;
 }
 
-static void akm8963_resume(struct power_suspend *handler)
+static int akm8963_resume(struct akm8963_data *akm)
 {
-	dev_info(&s_akm->i2c->dev, "%s: Resume\n", __func__);
+	dev_info(&akm->i2c->dev, "%s: Resume\n", __func__);
 
-	mutex_lock(&s_akm->state_mutex);
-	if (s_akm->enable_flag != 0)
-		s_akm->active_flag = 1;
-	s_akm->suspend_flag = 0;
-	mutex_unlock(&s_akm->state_mutex);
+	mutex_lock(&akm->state_mutex);
+	if (akm->enable_flag != 0)
+		akm->active_flag = 1;
+	akm->suspend_flag = 0;
+	mutex_unlock(&akm->state_mutex);
 
-	enable_irq(s_akm->irq);
+	enable_irq(akm->irq);
 
-	wake_up(&s_akm->open_wq);
+	wake_up(&akm->open_wq);
+
+	return 0;
 }
-#endif /* CONFIG_PM */
-#endif /* CONFIG_POWERSUSPEND */
+
+static int akm8963_pm_event(struct notifier_block *this,
+	unsigned long event, void *ptr)
+{
+	struct akm8963_data *akm = container_of(this,
+		struct akm8963_data, pm_notifier);
+
+	switch (event) {
+	case PM_SUSPEND_PREPARE:
+		akm8963_suspend(akm);
+		break;
+	case PM_POST_SUSPEND:
+		akm8963_resume(akm);
+		break;
+	}
+
+	return NOTIFY_DONE;
+}
 
 static int akm8963_parse_dt(struct device *dev, struct akm8963_platform_data *pdata)
 {
@@ -1721,15 +1737,18 @@ int __devinit akm8963_probe(struct i2c_client *client, const struct i2c_device_i
 		goto exit7;
 	}
 
-#ifdef CONFIG_POWERSUSPEND
-	s_akm->akm_power_suspend.suspend = akm8963_suspend;
-	s_akm->akm_power_suspend.resume = akm8963_resume;
-	register_power_suspend(&s_akm->akm_power_suspend);
-#endif
+	s_akm->pm_notifier.notifier_call = akm8963_pm_event;
+	err = register_pm_notifier(&s_akm->pm_notifier);
+	if (err < 0) {
+		pr_err("%s:Register_pm_notifier failed: %d\n", __func__, err);
+		goto exit_pm_fail;
+	}
 
 	dev_dbg(&client->dev, "%s: successfully probed", __func__);
 	return 0;
 
+exit_pm_fail:
+	remove_sysfs_interfaces(s_akm);
 exit7:
 	devm_regulator_put(s_akm->sr_1v8);
 	devm_regulator_put(s_akm->sr_2v85);
@@ -1756,12 +1775,13 @@ exit_i2c_fail:
 static int akm8963_remove(struct i2c_client *client)
 {
 	struct akm8963_data *akm = i2c_get_clientdata(client);
+
 	if (akm->vdd != NULL) {
 		regulator_disable(akm->vdd);
 		regulator_put(akm->vdd);
 	}
 
-	unregister_power_suspend(&akm->akm_power_suspend);
+	unregister_pm_notifier(&akm->pm_notifier);
 	remove_sysfs_interfaces(akm);
 	if (misc_deregister(&akm8963_dev) < 0)
 		dev_dbg(&client->dev, "%s: misc deregister failed.", __func__);
