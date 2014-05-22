@@ -422,6 +422,9 @@ static inline struct mdss_dsi_ctrl_pdata *mdss_dsi_get_master_ctrl(void)
 int mdss_dsi_panel_ioctl_handler(struct mdss_panel_data *pdata,
 							u32 cmd, void *arg);
 
+bool mdss_dsi_is_panel_dead(struct mdss_panel_data *pdata);
+
+static inline struct mdss_dsi_ctrl_pdata *mdss_dsi_get_slave_ctrl(void)
 {
 	if (mdss_dsi_broadcast_mode_enabled())
 		return ctrl_list[DSI_CTRL_SLAVE];
