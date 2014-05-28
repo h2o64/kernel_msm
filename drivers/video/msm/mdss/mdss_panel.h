@@ -336,6 +336,7 @@ struct mdss_panel_info {
 	bool esd_check_enabled;
 	char dfps_update;
 	int new_fps;
+	bool cont_splash_esd_rdy;
 	int panel_max_fps;
 	int panel_max_vtotal;
 	u32 xstart_pix_align;
