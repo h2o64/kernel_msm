@@ -238,6 +238,13 @@ struct msm_fb_data_type {
 	struct ion_handle *fb_ion_handle;
 };
 
+struct sys_panelinfo {
+	char *panel_name;
+	u64 *panel_ver;
+};
+
+extern struct sys_panelinfo panelinfo;
+
 static inline void mdss_fb_update_notify_update(struct msm_fb_data_type *mfd)
 {
 	int needs_complete = 0;
