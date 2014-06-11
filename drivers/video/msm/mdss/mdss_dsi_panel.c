@@ -30,6 +30,7 @@
 #define DT_CMD_HDR 6
 
 #define MIN_REFRESH_RATE 30
+#define DCS_CMD_GET_POWER_MODE 0x0A    /* get power_mode */
 
 DEFINE_LED_TRIGGER(bl_led_trigger);
 
@@ -290,6 +291,27 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 	return rc;
 }
 
+static int mdss_dsi_get_pwr_mode(struct mdss_panel_data *pdata, u8 *pwr_mode,
+								int read_mode)
+{
+	struct mdss_dsi_ctrl_pdata *ctrl;
+	int old_rd_mode;
+
+	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata, panel_data);
+
+	old_rd_mode = mdss_dsi_get_tx_power_mode(pdata);
+	if (read_mode != old_rd_mode)
+		mdss_dsi_set_tx_power_mode(read_mode, pdata);
+
+	mdss_dsi_panel_cmd_read(ctrl, DCS_CMD_GET_POWER_MODE, 0x00,
+							NULL, pwr_mode, 1);
+	if (read_mode != old_rd_mode)
+		mdss_dsi_set_tx_power_mode(old_rd_mode, pdata);
+
+	pr_debug("%s: panel power mode = 0x%x\n", __func__, *pwr_mode);
+
+	return 0;
+}
 static char caset[] = {0x2a, 0x00, 0x00, 0x03, 0x00};	/* DTYPE_DCS_LWRITE */
 static char paset[] = {0x2b, 0x00, 0x00, 0x05, 0x00};	/* DTYPE_DCS_LWRITE */
 
@@ -517,6 +539,7 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 {
 	struct mipi_panel_info *mipi;
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
+	u8 pwr_mode = 0;
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -541,7 +564,12 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	   may not be made visible to user until a point later than this */
 	mmi_panel_notify(MMI_PANEL_EVENT_DISPLAY_ON, NULL);
 
-	pr_info("%s:-\n", __func__);
+	mdss_dsi_get_pwr_mode(pdata, &pwr_mode, DSI_MODE_BIT_LP);
+	/* validate screen is actually on from the master control only */
+	if (!ctrl->ndx && (pwr_mode & 0x04) != 0x04)
+		pr_err("%s: Display failure: DISON (0x04) bit not set\n",
+								__func__);
+	pr_info("%s-. Pwr_mode(0x0A) = 0x%x\n", __func__, pwr_mode);
 
 	return 0;
 }
