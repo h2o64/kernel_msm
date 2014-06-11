@@ -218,6 +218,14 @@ struct dsi_kickoff_action {
 	void *data;
 };
 
+struct mdss_panel_config {
+	bool esd_enable;
+	bool esd_disable_bl;
+	bool bare_board;
+	char panel_name[32];
+	u64 panel_ver;
+};
+
 struct dsi_drv_cm_data {
 	struct regulator *vdd_vreg;
 	struct regulator *vdd_io_vreg;
@@ -256,6 +264,7 @@ struct mdss_dsi_ctrl_pdata {
 	int (*set_hbm)(struct mdss_dsi_ctrl_pdata *ctrl, int state);
 	struct mdss_panel_data panel_data;
 	struct dss_module_power panel_vregs;
+	struct mdss_panel_config panel_config;
 	unsigned char *ctrl_base;
 	struct dss_io_data ctrl_io;
 	struct dss_io_data mmss_misc_io;
@@ -423,6 +432,7 @@ int mdss_dsi_panel_ioctl_handler(struct mdss_panel_data *pdata,
 							u32 cmd, void *arg);
 
 bool mdss_dsi_is_panel_dead(struct mdss_panel_data *pdata);
+int mdss_panel_parse_panel_config_dt(struct mdss_dsi_ctrl_pdata *ctrl_pdata);
 
 static inline struct mdss_dsi_ctrl_pdata *mdss_dsi_get_slave_ctrl(void)
 {
