@@ -120,8 +120,12 @@ void mdss_check_dsi_ctrl_status(struct work_struct *work, uint32_t interval)
 	if (ctrl_pdata->status_mode == ESD_BTA) {
 		if (ctl->wait_pingpong)
 			ctl->wait_pingpong(ctl, NULL);
-
 		pr_debug("%s: DSI ctrl wait for ping pong done\n", __func__);
+	}
+
+	if (!pstatus_data->mfd->panel_power_on) {
+		pr_err("%s: panel off\n", __func__);
+		return;
 	}
 
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
