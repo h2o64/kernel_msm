@@ -30,6 +30,10 @@
 #include "mdss_fb.h"
 #include "dsi_v2.h"
 
+#ifdef CONFIG_POWERSUSPEND
+#include <linux/powersuspend.h>
+#endif
+
 #define PWR_MODE_BLACK_DROPBOX_MSG "PWR_MODE black screen detected"
 
 #define MDSS_PANEL_DEFAULT_VER 0xffffffffffffffff
@@ -556,6 +560,10 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_POWERSUSPEND
+	set_power_suspend_state_panel_hook(POWER_SUSPEND_INACTIVE);
+#endif
+
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 	mipi  = &pdata->panel_info.mipi;
@@ -628,6 +636,10 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	mdss_dsi_panel_regulator_on(pdata, 0);
 
 	mmi_panel_notify(MMI_PANEL_EVENT_DISPLAY_OFF, NULL);
+
+#ifdef CONFIG_POWERSUSPEND
+	set_power_suspend_state_panel_hook(POWER_SUSPEND_ACTIVE);
+#endif
 
 	pr_debug("%s:-\n", __func__);
 	return 0;
