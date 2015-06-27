@@ -1549,21 +1549,6 @@
 			< 2457600000  970000  802 >;
 	};
 
-	i2c@f9928000 { /* BLSP-1 QUP-6 */
-		cell-index = <3>;
-		compatible = "qcom,i2c-qup";
-		reg = <0xf9928000 0x1000>;
-		#address-cells = <1>;
-		#size-cells = <0>;
-		reg-names = "qup_phys_addr";
-		interrupts = <0 100 0>;
-		interrupt-names = "qup_err_intr";
-		qcom,i2c-bus-freq = <400000>;
-		qcom,i2c-src-freq = <19200000>;
-		qcom,sda-gpio = <&msmgpio 29 0>;
-		qcom,scl-gpio = <&msmgpio 30 0>;
-		qcom,master-id = <86>;
-	};
 };
 
 /* GPU overrides */
@@ -1761,11 +1746,4 @@
 
 &gdsc_venus {
 	qcom,skip-logic-collapse;
-};
-
-&sdhc_1 {
-	reg = <0xf9824900 0x1a0>, <0xf9824000 0x800>;
-
-	qcom,clk-rates = <400000 20000000 25000000 50000000 100000000 192000000 384000000>;
-	qcom,bus-speed-mode = "HS400_1p8v", "HS200_1p8v", "DDR_1p8v";
 };

@@ -23,6 +23,7 @@
 
 #include "mdss_fb.h"
 #include "mdss_mdp.h"
+#include "mdss_debug.h"
 #include "splash.h"
 #include "mdss_mdp_splash_logo.h"
 

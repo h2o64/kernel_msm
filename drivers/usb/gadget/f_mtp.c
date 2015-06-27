@@ -67,6 +67,8 @@
 #define MTP_RESPONSE_OK             0x2001
 #define MTP_RESPONSE_DEVICE_BUSY    0x2019
 
+#define MAX_CONTAINER_LENGTH        0xFFFFFFFF
+
 unsigned int mtp_rx_req_len = MTP_BULK_BUFFER_SIZE;
 module_param(mtp_rx_req_len, uint, S_IRUGO | S_IWUSR);
 
@@ -288,6 +290,22 @@ static struct usb_gadget_strings mtp_string_table = {
 
 static struct usb_gadget_strings *mtp_strings[] = {
 	&mtp_string_table,
+	NULL,
+};
+
+static struct usb_string ptp_string_defs[] = {
+	/* Naming interface "PTP" so test scripts will recognize us */
+	[INTERFACE_STRING_INDEX].s	= "PTP",
+	{  },	/* end of list */
+};
+
+static struct usb_gadget_strings ptp_string_table = {
+	.language		= 0x0409,	/* en-US */
+	.strings		= ptp_string_defs,
+};
+
+static struct usb_gadget_strings *ptp_strings[] = {
+	&ptp_string_table,
 	NULL,
 };
 
@@ -795,7 +813,10 @@ static void send_file_work(struct work_struct *data)
 		if (hdr_size) {
 			/* prepend MTP data header */
 			header = (struct mtp_data_header *)req->buf;
-			header->length = __cpu_to_le32(count);
+			if (count > MAX_CONTAINER_LENGTH)
+				header->length = MAX_CONTAINER_LENGTH;
+			else
+				header->length = __cpu_to_le32(count);
 			header->type = __cpu_to_le16(2); /* data packet */
 			header->command = __cpu_to_le16(dev->xfer_command);
 			header->transaction_id =
@@ -1337,7 +1358,13 @@ static int mtp_bind_config(struct usb_configuration *c, bool ptp_config)
 	printk(KERN_INFO "mtp_bind_config\n");
 
 	/* allocate a string ID for our interface */
-	if (mtp_string_defs[INTERFACE_STRING_INDEX].id == 0) {
+	if (ptp_config && ptp_string_defs[INTERFACE_STRING_INDEX].id == 0) {
+		ret = usb_string_id(c->cdev);
+		if (ret < 0)
+			return ret;
+		ptp_string_defs[INTERFACE_STRING_INDEX].id = ret;
+		ptp_interface_desc.iInterface = ret;
+	} else if (mtp_string_defs[INTERFACE_STRING_INDEX].id == 0) {
 		ret = usb_string_id(c->cdev);
 		if (ret < 0)
 			return ret;
@@ -1347,13 +1374,14 @@ static int mtp_bind_config(struct usb_configuration *c, bool ptp_config)
 
 	dev->cdev = c->cdev;
 	dev->function.name = "mtp";
-	dev->function.strings = mtp_strings;
 	if (ptp_config) {
+		dev->function.strings = ptp_strings;
 		dev->function.descriptors = fs_ptp_descs;
 		dev->function.hs_descriptors = hs_ptp_descs;
 		if (gadget_is_superspeed(c->cdev->gadget))
 			dev->function.ss_descriptors = ss_ptp_descs;
 	} else {
+		dev->function.strings = mtp_strings;
 		dev->function.descriptors = fs_mtp_descs;
 		dev->function.hs_descriptors = hs_mtp_descs;
 		if (gadget_is_superspeed(c->cdev->gadget))

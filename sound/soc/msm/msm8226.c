@@ -29,9 +29,12 @@
 #include <mach/subsystem_notif.h>
 #include <sound/q6core.h>
 
-#include <qdsp6v2/msm-pcm-routing-v2.h>
+#include "qdsp6v2/msm-pcm-routing-v2.h"
 #include "../codecs/wcd9xxx-common.h"
 #include "../codecs/wcd9306.h"
+#ifdef CONFIG_SND_SOC_TPA6165A2
+#include "../codecs/tpa6165a2-core.h"
+#endif
 
 #define SAMPLING_RATE_48KHZ 48000
 #define SAMPLING_RATE_96KHZ 96000
@@ -58,6 +61,7 @@
 
 #define LO_1_SPK_AMP   0x1
 #define LO_2_SPK_AMP   0x2
+#define SPK_RCV_SWITCH 0x4
 
 #define ADSP_STATE_READY_TIMEOUT_MS 50
 
@@ -157,6 +161,11 @@ static struct mutex cdc_mclk_mutex;
 static struct clk *codec_clk;
 static int clk_users;
 static int ext_spk_amp_gpio = -1;
+static int ext_top_spk_amp_gpio = -1;
+static int ext_top_spk_amp_boost_bp_gpio = -1;
+static int ext_top_spk_amp_boost_en_gpio = -1;
+static int ext_bot_spk_amp_gpio = -1;
+static int ext_spk_rcv_sel_gpio = -1;
 static int vdd_spkr_gpio = -1;
 static int msm_proxy_rx_ch = 2;
 
@@ -185,6 +194,28 @@ static void param_set_mask(struct snd_pcm_hw_params *p, int n, unsigned bit)
 		m->bits[bit >> 5] |= (1 << (bit & 31));
 	}
 }
+
+static atomic_t pri_mi2s_rsc_ref;
+
+static struct afe_clk_cfg lpass_mi2s_enable = {
+	AFE_API_VERSION_I2S_CONFIG,
+	Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ,
+	Q6AFE_LPASS_OSR_CLK_12_P288_MHZ,
+	Q6AFE_LPASS_CLK_SRC_INTERNAL,
+	Q6AFE_LPASS_CLK_ROOT_DEFAULT,
+	Q6AFE_LPASS_MODE_BOTH_VALID,
+	0,
+};
+
+static struct afe_clk_cfg lpass_mi2s_disable = {
+	AFE_API_VERSION_I2S_CONFIG,
+	0,
+	0,
+	Q6AFE_LPASS_CLK_SRC_INTERNAL,
+	Q6AFE_LPASS_CLK_ROOT_DEFAULT,
+	Q6AFE_LPASS_MODE_BOTH_VALID,
+	0,
+};
 
 static int msm_snd_enable_codec_ext_clk(struct snd_soc_codec *codec, int enable,
 					bool dapm)
@@ -247,15 +278,15 @@ static int msm8226_mclk_event(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
-static void msm8226_ext_spk_power_amp_enable(u32 enable)
+static void msm8226_ext_spk_power_amp_enable(int spk_amp_gpio, u32 enable)
 {
 	if (enable) {
-		gpio_direction_output(ext_spk_amp_gpio, enable);
+		gpio_direction_output(spk_amp_gpio, enable);
 		/* time takes enable the external power amplifier */
 		usleep_range(EXT_CLASS_D_EN_DELAY,
 			EXT_CLASS_D_EN_DELAY + EXT_CLASS_D_DELAY_DELTA);
 	} else {
-		gpio_direction_output(ext_spk_amp_gpio, enable);
+		gpio_direction_output(spk_amp_gpio, enable);
 		/* time takes disable the external power amplifier */
 		usleep_range(EXT_CLASS_D_DIS_DELAY,
 			EXT_CLASS_D_DIS_DELAY + EXT_CLASS_D_DELAY_DELTA);
@@ -278,11 +309,55 @@ static void msm8226_ext_spk_power_amp_on(u32 spk)
 				(msm8226_ext_spk_pamp & LO_2_SPK_AMP))
 				if (ext_spk_amp_gpio >= 0) {
 					pr_debug("%s  enable power", __func__);
-					msm8226_ext_spk_power_amp_enable(1);
+					msm8226_ext_spk_power_amp_enable(
+						ext_spk_amp_gpio, 1);
 				}
 		} else  {
 			pr_err("%s: Invalid external speaker ampl. spk = 0x%x\n",
 				__func__, spk);
+		}
+	} else if (gpio_is_valid(ext_top_spk_amp_gpio) &&
+		gpio_is_valid(ext_bot_spk_amp_gpio) &&
+		gpio_is_valid(ext_spk_rcv_sel_gpio)) {
+		if (spk & LO_1_SPK_AMP) {
+			if (gpio_is_valid(ext_top_spk_amp_boost_en_gpio) &&
+				gpio_is_valid(ext_top_spk_amp_boost_bp_gpio)) {
+				if (ext_top_spk_amp_boost_bp_gpio >= 0) {
+					pr_debug("%s set top spk amp boost bp",
+						__func__);
+					msm8226_ext_spk_power_amp_enable(
+						ext_top_spk_amp_boost_bp_gpio,
+						1);
+				}
+				if (ext_top_spk_amp_boost_en_gpio >= 0) {
+					pr_debug("%s enable top spk amp boost en",
+						__func__);
+					msm8226_ext_spk_power_amp_enable(
+						ext_top_spk_amp_boost_en_gpio,
+						1);
+				}
+			}
+			if (ext_top_spk_amp_gpio >= 0) {
+				pr_debug("%s enable power-TOP amp", __func__);
+				msm8226_ext_spk_power_amp_enable(
+					ext_top_spk_amp_gpio, 1);
+			}
+			/* SPK_RCV_SEL is a switch. Always set a value */
+			if (ext_spk_rcv_sel_gpio >= 0) {
+				pr_debug("%s  switch to mode: %s", __func__,
+					(spk & SPK_RCV_SWITCH) == 0 ? "speaker"
+					: "ear");
+				msm8226_ext_spk_power_amp_enable(
+					ext_spk_rcv_sel_gpio,
+					(spk & SPK_RCV_SWITCH) == 0 ? 0 : 1);
+			}
+		}
+		if (spk & LO_2_SPK_AMP) {
+			if (ext_bot_spk_amp_gpio >= 0) {
+				pr_debug("%s  enable power-BOT amp", __func__);
+				msm8226_ext_spk_power_amp_enable(
+					ext_bot_spk_amp_gpio, 1);
+			}
 		}
 	}
 }
@@ -299,13 +374,55 @@ static void msm8226_ext_spk_power_amp_off(u32 spk)
 			if (!msm8226_ext_spk_pamp) {
 				if (ext_spk_amp_gpio >= 0) {
 					pr_debug("%s  disable power", __func__);
-					msm8226_ext_spk_power_amp_enable(0);
+					msm8226_ext_spk_power_amp_enable(
+						ext_spk_amp_gpio, 0);
 				}
 				msm8226_ext_spk_pamp = 0;
 			}
 		 } else  {
 			pr_err("%s: ERROR : Invalid Ext Spk Ampl. spk = 0x%08x\n",
 				__func__, spk);
+		}
+	} else if (gpio_is_valid(ext_top_spk_amp_gpio) &&
+		gpio_is_valid(ext_bot_spk_amp_gpio) &&
+		gpio_is_valid(ext_spk_rcv_sel_gpio)) {
+		if (spk & LO_1_SPK_AMP) {
+			if (ext_top_spk_amp_gpio >= 0) {
+				pr_debug("%s disable power-TOP amp", __func__);
+				msm8226_ext_spk_power_amp_enable(
+					ext_top_spk_amp_gpio, 0);
+			}
+			/* SPK_RCV_SEL is a switch. default to speaker */
+			if (ext_spk_rcv_sel_gpio >= 0) {
+				pr_debug("%s  switch back to speaker mode",
+					__func__);
+				msm8226_ext_spk_power_amp_enable(
+					ext_spk_rcv_sel_gpio, 0);
+			}
+			if (gpio_is_valid(ext_top_spk_amp_boost_bp_gpio) &&
+				gpio_is_valid(ext_top_spk_amp_boost_en_gpio)) {
+				if (ext_top_spk_amp_boost_bp_gpio >= 0) {
+					pr_debug("%s set top spk amp boost bp",
+						__func__);
+					msm8226_ext_spk_power_amp_enable(
+						ext_top_spk_amp_boost_bp_gpio,
+						1);
+				}
+				if (ext_top_spk_amp_boost_en_gpio >= 0) {
+					pr_debug("%s disable top spk amp boost en",
+						__func__);
+					msm8226_ext_spk_power_amp_enable(
+						ext_top_spk_amp_boost_en_gpio,
+						0);
+				}
+			}
+		}
+		if (spk & LO_2_SPK_AMP) {
+			if (ext_bot_spk_amp_gpio >= 0) {
+				pr_debug("%s disable power-BOT amp", __func__);
+				msm8226_ext_spk_power_amp_enable(
+					ext_bot_spk_amp_gpio, 0);
+			}
 		}
 	}
 }
@@ -320,6 +437,9 @@ static int msm8226_ext_spkramp_event(struct snd_soc_dapm_widget *w,
 			msm8226_ext_spk_power_amp_on(LO_1_SPK_AMP);
 		else if (!strncmp(w->name, "Lineout_2 amp", 14))
 			msm8226_ext_spk_power_amp_on(LO_2_SPK_AMP);
+		else if (!strncmp(w->name, "Ear select", 15))
+			msm8226_ext_spk_power_amp_on(
+				LO_1_SPK_AMP|SPK_RCV_SWITCH);
 		else {
 			pr_err("%s() Invalid Speaker Widget = %s\n",
 				__func__, w->name);
@@ -330,6 +450,9 @@ static int msm8226_ext_spkramp_event(struct snd_soc_dapm_widget *w,
 			msm8226_ext_spk_power_amp_off(LO_1_SPK_AMP);
 		else if (!strncmp(w->name, "Lineout_2 amp", 14))
 			msm8226_ext_spk_power_amp_off(LO_2_SPK_AMP);
+		else if (!strncmp(w->name, "Ear select", 15))
+			msm8226_ext_spk_power_amp_off(
+				LO_1_SPK_AMP|SPK_RCV_SWITCH);
 		else {
 			pr_err("%s() Invalid Speaker Widget = %s\n",
 				__func__, w->name);
@@ -386,6 +509,7 @@ static const struct snd_soc_dapm_widget msm8226_dapm_widgets[] = {
 
 	SND_SOC_DAPM_SPK("Lineout_1 amp", msm8226_ext_spkramp_event),
 	SND_SOC_DAPM_SPK("Lineout_2 amp", msm8226_ext_spkramp_event),
+	SND_SOC_DAPM_SPK("Ear select", msm8226_ext_spkramp_event),
 
 	SND_SOC_DAPM_SUPPLY("EXT_VDD_SPKR",  SND_SOC_NOPM, 0, 0,
 	msm8226_vdd_spkr_event, SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
@@ -460,6 +584,38 @@ static int slim0_rx_sample_rate_put(struct snd_kcontrol *kcontrol,
 
 	return 0;
 }
+
+#ifdef CONFIG_SND_SOC_TPA6165A2
+static int msm_ext_hp_event(struct snd_soc_dapm_widget *w,
+		struct snd_kcontrol *kcontrol, int event)
+{
+	if (SND_SOC_DAPM_EVENT_ON(event))
+		tpa6165_hp_event(1);
+	else
+		tpa6165_hp_event(0);
+	return 0;
+}
+
+static int msm_ext_mic_event(struct snd_soc_dapm_widget *w,
+		struct snd_kcontrol *kcontrol, int event)
+{
+	if (SND_SOC_DAPM_EVENT_ON(event))
+		tpa6165_mic_event(1);
+	else
+		tpa6165_mic_event(0);
+	return 0;
+}
+
+static const struct snd_soc_dapm_widget tpa6165_dapm_widgets[] = {
+	SND_SOC_DAPM_MIC("TPA6165 Headset Mic", msm_ext_mic_event),
+	SND_SOC_DAPM_HP("TPA6165 Headphone", msm_ext_hp_event),
+};
+
+static const struct snd_soc_dapm_route tpa6165_hp_map[] = {
+	{"TPA6165 Headphone", NULL, "HEADPHONE"},
+	{"MIC BIAS2 External", NULL, "TPA6165 Headset Mic"},
+};
+#endif
 
 static int msm_slim_0_rx_ch_get(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
@@ -1010,6 +1166,25 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 		return err;
 	}
 
+#ifdef CONFIG_SND_SOC_TPA6165A2
+	err = tpa6165_hs_detect(codec);
+	if (!err) {
+		pr_info("%s:tpa6165 hs det mechanism is used", __func__);
+		/* dapm controls for tpa6165 */
+		snd_soc_dapm_new_controls(dapm, tpa6165_dapm_widgets,
+				ARRAY_SIZE(tpa6165_dapm_widgets));
+
+		snd_soc_dapm_add_routes(dapm, tpa6165_hp_map,
+				ARRAY_SIZE(tpa6165_hp_map));
+
+		snd_soc_dapm_enable_pin(dapm, "TPA6165 Headphone");
+		snd_soc_dapm_enable_pin(dapm, "TPA6165 Headset Mic");
+		snd_soc_dapm_sync(dapm);
+	} else {
+		goto out;
+	}
+#else
+
 	/* start mbhc */
 	mbhc_cfg.calibration = def_tapan_mbhc_cal();
 	if (mbhc_cfg.calibration) {
@@ -1018,6 +1193,7 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 		err = -ENOMEM;
 		goto out;
 	}
+#endif
 
 	adsp_state_notifier =
 		subsys_notif_register_notifier("adsp",
@@ -2090,6 +2266,221 @@ static struct snd_soc_dai_link msm8226_9302_dai[] = {
 	},
 };
 
+static int msm8226_pri_mi2s_startup(struct snd_pcm_substream *substream)
+{
+	int ret = 0;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	struct snd_soc_card *card = rtd->card;
+	struct msm8226_asoc_mach_data *pdata = snd_soc_card_get_drvdata(card);
+	struct msm_auxpcm_ctrl *auxpcm_ctrl = NULL;
+
+	if (!pdata) {
+		pr_err("%s: no machine data!\n", __func__);
+		return -ENODEV;
+	}
+
+	if (atomic_inc_return(&pri_mi2s_rsc_ref) == 1) {
+
+		auxpcm_ctrl = pdata->auxpcm_ctrl;
+		msm_aux_pcm_get_gpios(auxpcm_ctrl);
+
+		ret = afe_set_lpass_clock(AFE_PORT_ID_PRIMARY_MI2S_RX,
+						&lpass_mi2s_enable);
+		if (ret < 0) {
+			pr_err("%s: afe_set_lpass_clock failed\n", __func__);
+			return ret;
+		}
+
+		ret = snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_CBS_CFS);
+		if (ret < 0)
+			dev_err(cpu_dai->dev, "set format for CPU dai failed\n");
+
+		ret = snd_soc_dai_set_fmt(codec_dai,
+			SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_I2S);
+		if (ret < 0)
+			dev_err(codec_dai->dev, "set format for codec dai failed\n");
+	}
+
+	return ret;
+}
+
+static void msm8226_pri_mi2s_shutdown(struct snd_pcm_substream *substream)
+{
+	int ret = 0;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_card *card = rtd->card;
+	struct msm8226_asoc_mach_data *pdata = snd_soc_card_get_drvdata(card);
+	struct msm_auxpcm_ctrl *auxpcm_ctrl = NULL;
+
+	if (!pdata) {
+		pr_err("%s: no machine data!\n", __func__);
+		return;
+	}
+
+	if (atomic_dec_return(&pri_mi2s_rsc_ref) == 0) {
+
+		ret = afe_set_lpass_clock(AFE_PORT_ID_PRIMARY_MI2S_RX,
+				&lpass_mi2s_disable);
+		if (ret < 0)
+			pr_err("%s: afe_set_lpass_clock failed\n", __func__);
+
+		auxpcm_ctrl = pdata->auxpcm_ctrl;
+		msm_aux_pcm_free_gpios(auxpcm_ctrl);
+	}
+}
+
+static int msm8226_pri_mi2s_rx_hw_params(struct snd_pcm_substream *substream,
+			struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	int ret = 0;
+
+	ret = snd_soc_dai_set_sysclk(codec_dai, 0,
+			Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ,
+			SND_SOC_CLOCK_IN);
+	if (ret < 0)
+		pr_err("can't set rx codec clk configuration\n");
+
+	return ret;
+}
+
+static struct snd_soc_ops msm8226_pri_mi2s_be_ops = {
+	.startup = msm8226_pri_mi2s_startup,
+	.shutdown = msm8226_pri_mi2s_shutdown,
+	.hw_params = msm8226_pri_mi2s_rx_hw_params,
+};
+
+static struct snd_soc_dai_link msm8226_9302_tfa9890_dai[] = {
+	/* Backend DAI Links */
+	{
+		.name = LPASS_BE_SLIMBUS_0_RX,
+		.stream_name = "Slimbus Playback",
+		.cpu_dai_name = "msm-dai-q6-dev.16384",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "tapan_codec",
+		.codec_dai_name	= "tapan9302_rx1",
+		.no_pcm = 1,
+		.be_id = MSM_BACKEND_DAI_SLIMBUS_0_RX,
+		.init = &msm_audrx_init,
+		.be_hw_params_fixup = msm_slim_0_rx_be_hw_params_fixup,
+		.ops = &msm8226_be_ops,
+		.ignore_pmdown_time = 1, /* dai link has playback support */
+		.ignore_suspend = 1,
+	},
+	{
+		.name = LPASS_BE_SLIMBUS_0_TX,
+		.stream_name = "Slimbus Capture",
+		.cpu_dai_name = "msm-dai-q6-dev.16385",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "tapan_codec",
+		.codec_dai_name	= "tapan9302_tx1",
+		.no_pcm = 1,
+		.be_id = MSM_BACKEND_DAI_SLIMBUS_0_TX,
+		.be_hw_params_fixup = msm_slim_0_tx_be_hw_params_fixup,
+		.ops = &msm8226_be_ops,
+		.ignore_suspend = 1,
+	},
+	{
+		.name = LPASS_BE_SLIMBUS_1_RX,
+		.stream_name = "Slimbus1 Playback",
+		.cpu_dai_name = "msm-dai-q6-dev.16386",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "tapan_codec",
+		.codec_dai_name	= "tapan9302_rx1",
+		.no_pcm = 1,
+		.be_id = MSM_BACKEND_DAI_SLIMBUS_1_RX,
+		.be_hw_params_fixup = msm_slim_0_rx_be_hw_params_fixup,
+		.ops = &msm8226_be_ops,
+		/* dai link has playback support */
+		.ignore_pmdown_time = 1,
+		.ignore_suspend = 1,
+	},
+	{
+		.name = LPASS_BE_SLIMBUS_1_TX,
+		.stream_name = "Slimbus1 Capture",
+		.cpu_dai_name = "msm-dai-q6-dev.16387",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "tapan_codec",
+		.codec_dai_name	= "tapan9302_tx1",
+		.no_pcm = 1,
+		.be_id = MSM_BACKEND_DAI_SLIMBUS_1_TX,
+		.be_hw_params_fixup = msm_slim_0_tx_be_hw_params_fixup,
+		.ops = &msm8226_be_ops,
+		.ignore_suspend = 1,
+	},
+	{
+		.name = LPASS_BE_SLIMBUS_3_RX,
+		.stream_name = "Slimbus3 Playback",
+		.cpu_dai_name = "msm-dai-q6-dev.16390",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "tapan_codec",
+		.codec_dai_name	= "tapan9302_rx1",
+		.no_pcm = 1,
+		.be_id = MSM_BACKEND_DAI_SLIMBUS_3_RX,
+		.be_hw_params_fixup = msm_slim_0_rx_be_hw_params_fixup,
+		.ops = &msm8226_be_ops,
+		/* dai link has playback support */
+		.ignore_pmdown_time = 1,
+		.ignore_suspend = 1,
+	},
+	{
+		.name = LPASS_BE_SLIMBUS_3_TX,
+		.stream_name = "Slimbus3 Capture",
+		.cpu_dai_name = "msm-dai-q6-dev.16391",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "tapan_codec",
+		.codec_dai_name	= "tapan9302_tx1",
+		.no_pcm = 1,
+		.be_id = MSM_BACKEND_DAI_SLIMBUS_3_TX,
+		.be_hw_params_fixup = msm_slim_0_tx_be_hw_params_fixup,
+		.ops = &msm8226_be_ops,
+		.ignore_suspend = 1,
+	},
+	{
+		.name = LPASS_BE_SLIMBUS_4_RX,
+		.stream_name = "Slimbus4 Playback",
+		.cpu_dai_name = "msm-dai-q6-dev.16392",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "tapan_codec",
+		.codec_dai_name	= "tapan9302_rx1",
+		.no_pcm = 1,
+		.be_id = MSM_BACKEND_DAI_SLIMBUS_4_RX,
+		.be_hw_params_fixup = msm_slim_0_rx_be_hw_params_fixup,
+		.ops = &msm8226_be_ops,
+		/* dai link has playback support */
+		.ignore_pmdown_time = 1,
+		.ignore_suspend = 1,
+	},
+	{
+		.name = LPASS_BE_SLIMBUS_4_TX,
+		.stream_name = "Slimbus4 Capture",
+		.cpu_dai_name = "msm-dai-q6-dev.16393",
+		.platform_name = "msm-pcm-routing",
+		.codec_name = "tapan_codec",
+		.codec_dai_name	= "tapan9302_tx1",
+		.no_pcm = 1,
+		.be_id = MSM_BACKEND_DAI_SLIMBUS_4_TX,
+		.be_hw_params_fixup = msm_slim_0_tx_be_hw_params_fixup,
+		.ops = &msm8226_be_ops,
+		.ignore_suspend = 1,
+	},
+	{
+		.name = LPASS_BE_PRI_MI2S_RX,
+		.stream_name = "Primary MI2S Playback",
+		.cpu_dai_name = "msm-dai-q6-mi2s.0",
+		.platform_name = "msm-pcm-routing",
+		.codec_name     = "tfa9890.3-0034",
+		.codec_dai_name = "tfa9890_codec_left",
+		.no_pcm = 1,
+		.be_id = MSM_BACKEND_DAI_PRI_MI2S_RX,
+		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm8226_pri_mi2s_be_ops,
+	},
+};
+
 static struct snd_soc_dai_link msm8226_9306_dai_links[
 				ARRAY_SIZE(msm8226_common_dai) +
 				ARRAY_SIZE(msm8226_9306_dai)];
@@ -2097,6 +2488,10 @@ static struct snd_soc_dai_link msm8226_9306_dai_links[
 static struct snd_soc_dai_link msm8226_9302_dai_links[
 				ARRAY_SIZE(msm8226_common_dai) +
 				ARRAY_SIZE(msm8226_9302_dai)];
+
+static struct snd_soc_dai_link msm8226_9302_tfa9890_dai_links[
+				ARRAY_SIZE(msm8226_common_dai) +
+				ARRAY_SIZE(msm8226_9302_tfa9890_dai)];
 
 struct snd_soc_card snd_soc_card_msm8226 = {
 	.name		= "msm8226-tapan-snd-card",
@@ -2108,6 +2503,13 @@ struct snd_soc_card snd_soc_card_9302_msm8226 = {
 	.name		= "msm8226-tapan9302-snd-card",
 	.dai_link	= msm8226_9302_dai_links,
 	.num_links	= ARRAY_SIZE(msm8226_9302_dai_links),
+};
+
+struct snd_soc_card snd_soc_card_9302_tfa9890_msm8226 = {
+	.name		= "msm8226-tapan9302-tfa9890-snd-card",
+	.long_name  = "msm8226-tapan9302-snd-card,tfa9890_codec_left",
+	.dai_link	= msm8226_9302_tfa9890_dai_links,
+	.num_links	= ARRAY_SIZE(msm8226_9302_tfa9890_dai_links),
 };
 
 static int msm8226_dtparse_auxpcm(struct platform_device *pdev,
@@ -2234,6 +2636,16 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 	struct snd_soc_card *card;
 
 	if (of_property_read_bool(dev->of_node,
+					"qcom,tapan-codec-9302-tfa9890")) {
+		card = &snd_soc_card_9302_tfa9890_msm8226;
+		memcpy(msm8226_9302_tfa9890_dai_links, msm8226_common_dai,
+				sizeof(msm8226_common_dai));
+		memcpy(msm8226_9302_tfa9890_dai_links
+				+ ARRAY_SIZE(msm8226_common_dai),
+				msm8226_9302_tfa9890_dai,
+				sizeof(msm8226_9302_tfa9890_dai));
+
+	} else if (of_property_read_bool(dev->of_node,
 					"qcom,tapan-codec-9302")) {
 		card = &snd_soc_card_9302_msm8226;
 
@@ -2324,6 +2736,7 @@ static __devinit int msm8226_asoc_machine_probe(struct platform_device *pdev)
 		goto err1;
 
 	mutex_init(&cdc_mclk_mutex);
+	atomic_set(&pri_mi2s_rsc_ref, 0);
 
 	mbhc_cfg.gpio_level_insert = of_property_read_bool(pdev->dev.of_node,
 					"qcom,headset-jack-type-NC");
@@ -2412,6 +2825,108 @@ static __devinit int msm8226_asoc_machine_probe(struct platform_device *pdev)
 		}
 	}
 
+	ext_top_spk_amp_gpio = of_get_named_gpio(pdev->dev.of_node,
+			"fih,cdc-lineout-topspkr-gpios", 0);
+	if (ext_top_spk_amp_gpio < 0) {
+		dev_err(&pdev->dev,
+			"Looking up %s property in node %s failed %d\n",
+			"fih, cdc-lineout-topspkr-gpios",
+			pdev->dev.of_node->full_name, ext_top_spk_amp_gpio);
+	} else {
+		ret = gpio_request(ext_top_spk_amp_gpio,
+				"TAPAN_CODEC_LINEOUT_TOP_SPKR");
+		if (ret) {
+			/* GPIO to enable TOP EXT AMP exists,
+			   but failed request */
+			dev_err(card->dev,
+				"%s: Failed to request tapan amp spkr gpio %d\n",
+				__func__, ext_top_spk_amp_gpio);
+			goto err_lineout_spkr;
+		}
+	}
+
+	ext_top_spk_amp_boost_bp_gpio = of_get_named_gpio(pdev->dev.of_node,
+			"fih,cdc-lineout-topspkr-boost-bp-gpio", 0);
+	if (ext_top_spk_amp_boost_bp_gpio < 0) {
+		dev_err(&pdev->dev,
+			"Looking up %s property in node %s failed %d\n",
+			"fih, cdc-lineout-topspkr-boost-bp-gpio",
+			pdev->dev.of_node->full_name,
+			ext_top_spk_amp_boost_bp_gpio);
+	} else {
+		ret = gpio_request(ext_top_spk_amp_boost_bp_gpio,
+				"TAPAN_CODEC_TOP_SPKR_BOOST_BP");
+		if (ret) {
+			/* GPIO to enable TOP EXT AMP exists,
+			   but failed request */
+			dev_err(card->dev,
+				"%s: Failed to request tapan amp spkr boost bp gpio %d\n",
+				__func__, ext_top_spk_amp_boost_bp_gpio);
+			goto err_lineout_top_spkr;
+		}
+	}
+
+	ext_top_spk_amp_boost_en_gpio = of_get_named_gpio(pdev->dev.of_node,
+			"fih,cdc-lineout-topspkr-boost-en-gpio", 0);
+	if (ext_top_spk_amp_boost_en_gpio < 0) {
+		dev_err(&pdev->dev,
+			"Looking up %s property in node %s failed %d\n",
+			"fih, cdc-lineout-topspkr-boost-en-gpio",
+			pdev->dev.of_node->full_name,
+			ext_top_spk_amp_boost_en_gpio);
+	} else {
+		ret = gpio_request(ext_top_spk_amp_boost_en_gpio,
+				"TAPAN_CODEC_TOP_SPKR_BOOST_EN");
+		if (ret) {
+			/* GPIO to enable TOP EXT AMP exists,
+			   but failed request */
+			dev_err(card->dev,
+				"%s: Failed to request tapan amp spkr boost en gpio %d\n",
+				__func__, ext_top_spk_amp_boost_en_gpio);
+			goto err_lineout_top_spkr_bp;
+		}
+	}
+
+	ext_bot_spk_amp_gpio = of_get_named_gpio(pdev->dev.of_node,
+			"fih,cdc-lineout-botspkr-gpios", 0);
+	if (ext_bot_spk_amp_gpio < 0) {
+		dev_err(&pdev->dev,
+			"Looking up %s property in node %s failed %d\n",
+			"fih, cdc-lineout-botspkr-gpios",
+			pdev->dev.of_node->full_name, ext_bot_spk_amp_gpio);
+	} else {
+		ret = gpio_request(ext_bot_spk_amp_gpio,
+				"TAPAN_CODEC_LINEOUT_BOT_SPKR");
+		if (ret) {
+			/* GPIO to enable BOT EXT AMP exists,
+			   but failed request */
+			dev_err(card->dev,
+				"%s: Failed to request tapan amp spkr gpio %d\n",
+				__func__, ext_bot_spk_amp_gpio);
+			goto err_lineout_top_spkr_en;
+		}
+	}
+
+	ext_spk_rcv_sel_gpio = of_get_named_gpio(pdev->dev.of_node,
+			"fih,cdc-spk-rcv-sel-gpios", 0);
+	if (ext_spk_rcv_sel_gpio < 0) {
+		dev_err(&pdev->dev,
+			"Looking up %s property in node %s failed %d\n",
+			"fih,cdc-spk-rcv-sel-gpios",
+			pdev->dev.of_node->full_name, ext_spk_rcv_sel_gpio);
+	} else {
+		ret = gpio_request(ext_spk_rcv_sel_gpio,
+				"TAPAN_CODEC_LINEOUT_SPKR_RVC_SEL");
+		if (ret) {
+			/* GPIO to enable SPK/EAR SELECT exists,
+			   but failed request */
+			dev_err(card->dev,
+				"%s: Failed to request tapan spkr ear select gpio %d\n",
+				__func__, ext_spk_rcv_sel_gpio);
+			goto err_lineout_bot_spkr;
+		}
+	}
+
 	msm8226_setup_hs_jack(pdev, pdata);
 
 	ret = of_property_read_string(pdev->dev.of_node,
@@ -2420,7 +2935,7 @@ static __devinit int msm8226_asoc_machine_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Looking up %s property in node %s failed",
 			"qcom,prim-auxpcm-gpio-set",
 			pdev->dev.of_node->full_name);
-		goto err_lineout_spkr;
+		goto err_spkr_rcv_sel;
 	}
 	if (!strcmp(auxpcm_pri_gpio_set, "prim-gpio-prim")) {
 		lpaif_pri_muxsel_virt_addr = ioremap(LPAIF_PRI_MODE_MUXSEL, 4);
@@ -2430,15 +2945,46 @@ static __devinit int msm8226_asoc_machine_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Invalid value %s for AUXPCM GPIO set\n",
 			auxpcm_pri_gpio_set);
 		ret = -EINVAL;
-		goto err_lineout_spkr;
+		goto err_spkr_rcv_sel;
 	}
 	if (lpaif_pri_muxsel_virt_addr == NULL) {
 		pr_err("%s Pri muxsel virt addr is null\n", __func__);
 		ret = -EINVAL;
-		goto err_lineout_spkr;
+		goto err_spkr_rcv_sel;
 	}
 
 	return 0;
+
+err_spkr_rcv_sel:
+	if (ext_spk_rcv_sel_gpio >= 0) {
+		gpio_free(ext_spk_rcv_sel_gpio);
+		ext_spk_rcv_sel_gpio = -1;
+	}
+
+err_lineout_bot_spkr:
+	if (ext_bot_spk_amp_gpio >= 0) {
+		gpio_free(ext_bot_spk_amp_gpio);
+		ext_bot_spk_amp_gpio = -1;
+	}
+
+err_lineout_top_spkr_en:
+	if (ext_top_spk_amp_boost_en_gpio >= 0) {
+		gpio_free(ext_top_spk_amp_boost_en_gpio);
+		ext_top_spk_amp_boost_en_gpio = -1;
+	}
+
+
+err_lineout_top_spkr_bp:
+	if (ext_top_spk_amp_boost_bp_gpio >= 0) {
+		gpio_free(ext_top_spk_amp_boost_bp_gpio);
+		ext_top_spk_amp_boost_bp_gpio = -1;
+	}
+
+err_lineout_top_spkr:
+	if (ext_top_spk_amp_gpio >= 0) {
+		gpio_free(ext_top_spk_amp_gpio);
+		ext_top_spk_amp_gpio = -1;
+	}
 
 err_lineout_spkr:
 	if (ext_spk_amp_gpio >= 0) {

@@ -554,6 +554,10 @@ struct fb_cursor_user {
 #define FB_EVENT_FB_UNBIND              0x0E
 /*      CONSOLE-SPECIFIC: remap all consoles to new fb - for vga switcheroo */
 #define FB_EVENT_REMAP_ALL_CONSOLE      0x0F
+/*      A hardware display blank early change occured */
+#define FB_EARLY_EVENT_BLANK		0x10
+/*      A hardware display blank revert early change occured */
+#define FB_R_EARLY_EVENT_BLANK		0x11
 
 struct fb_event {
 	struct fb_info *info;
@@ -630,6 +634,9 @@ struct fb_ops {
 	struct module *owner;
 	int (*fb_open)(struct fb_info *info, int user);
 	int (*fb_release)(struct fb_info *info, int user);
+
+	int (*fb_open2)(struct fb_info *info, struct file *file, int user);
+	int (*fb_release2)(struct fb_info *info, struct file *file, int user);
 
 	/* For framebuffers with strange non linear layouts or that do not
 	 * work with normal memory mapped access

@@ -24,6 +24,7 @@
 #include <linux/tick.h>
 #include <linux/suspend.h>
 #include <linux/pm_qos.h>
+#include <linux/quickwakeup.h>
 #include <linux/of_platform.h>
 #include <mach/mpm.h>
 #include <mach/cpuidle.h>
@@ -737,14 +738,20 @@ static void lpm_enter_low_power(struct lpm_system_state *system_state,
 	lpm_cpu_unprepare(system_state, cpu_index, from_idle);
 }
 
+DEFINE_PER_CPU(int32_t, last_index);
+DEFINE_PER_CPU(int64_t, sleep_time);
+
 static int lpm_cpuidle_enter(struct cpuidle_device *dev,
 		struct cpuidle_driver *drv, int index)
 {
 	int64_t time = ktime_to_ns(ktime_get());
 	int idx;
 
+	per_cpu(sleep_time, dev->cpu) = ktime_to_ns(tick_nohz_get_sleep_length());
+
 	idx = menu_select ? lpm_cpu_menu_select(dev, &index) :
 			lpm_cpu_power_select(dev, &index);
+	per_cpu(last_index, dev->cpu) = idx;
 	if (idx < 0) {
 		local_irq_enable();
 		return -EPERM;
@@ -753,7 +760,13 @@ static int lpm_cpuidle_enter(struct cpuidle_device *dev,
 	lpm_enter_low_power(&sys_state, idx, true);
 
 	time = ktime_to_ns(ktime_get()) - time;
+
+	if (per_cpu(sleep_time, dev->cpu) + NSEC_PER_SEC < time)
+		pr_info("%s(): Expected sleep time = %lld, residency = %lld\n", __func__,
+				per_cpu(sleep_time, dev->cpu), time);
+
 	do_div(time, 1000);
+
 	dev->last_residency = (int)time;
 	local_irq_enable();
 	return idx;
@@ -812,6 +825,7 @@ static const struct platform_suspend_ops lpm_suspend_ops = {
 	.valid = suspend_valid_only_mem,
 	.prepare_late = lpm_suspend_prepare,
 	.wake = lpm_suspend_wake,
+	.suspend_again = quickwakeup_suspend_again,
 };
 
 static void setup_broadcast_timer(void *arg)

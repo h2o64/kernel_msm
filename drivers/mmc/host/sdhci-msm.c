@@ -101,6 +101,8 @@ enum sdc_mpm_pin_state {
 
 #define CORE_VENDOR_SPEC_ADMA_ERR_ADDR0	0x114
 #define CORE_VENDOR_SPEC_ADMA_ERR_ADDR1	0x118
+#define CORE_VENDOR_SPEC_CAPABILITIES0	0x11C
+#define CORE_VENDOR_SPEC_CAPABILITIES1	0x120
 
 #define CORE_CSR_CDC_CTLR_CFG0		0x130
 #define CORE_SW_TRIG_FULL_CALIB		(1 << 16)
@@ -199,12 +201,11 @@ struct sdhci_msm_reg_data {
 	/* voltage level to be set */
 	u32 low_vol_level;
 	u32 high_vol_level;
+	u32 curr_vol_level;
 	/* Load values for low power and high power mode */
 	u32 lpm_uA;
 	u32 hpm_uA;
 
-	/* is this regulator enabled? */
-	bool is_enabled;
 	/* is this regulator needs to be always on? */
 	bool is_always_on;
 	/* is low power mode setting required for this regulator? */
@@ -221,6 +222,10 @@ struct sdhci_msm_slot_reg_data {
 	struct sdhci_msm_reg_data *vdd_data;
 	 /* keeps VDD IO regulator info */
 	struct sdhci_msm_reg_data *vdd_io_data;
+	/* number of users of slot power */
+	int users;
+	/* protect regulator management during concurrent access */
+	struct mutex lock;
 };
 
 struct sdhci_msm_gpio {
@@ -253,7 +258,10 @@ struct sdhci_msm_pad_drv {
 struct sdhci_msm_pad_drv_data {
 	struct sdhci_msm_pad_drv *on;
 	struct sdhci_msm_pad_drv *off;
+	struct sdhci_msm_pad_drv *tune;
 	u8 size;
+	u8 tune_size;
+	u8 tune_index;
 };
 
 struct sdhci_msm_pad_data {
@@ -289,7 +297,9 @@ struct sdhci_msm_pltfm_data {
 	unsigned long mmc_bus_width;
 	struct sdhci_msm_slot_reg_data *vreg_data;
 	bool nonremovable;
+	bool is_emmc;
 	struct sdhci_msm_pin_data *pin_data;
+	u8 drv_types;
 	u32 cpu_dma_latency_us;
 	int status_gpio; /* card detection GPIO that is configured as IRQ */
 	struct sdhci_msm_bus_voting_data *voting_data;
@@ -1095,6 +1105,7 @@ static int sdhci_msm_dt_parse_vreg_info(struct device *dev,
 	} else {
 		vreg->low_vol_level = be32_to_cpup(&prop[0]);
 		vreg->high_vol_level = be32_to_cpup(&prop[1]);
+		vreg->curr_vol_level = vreg->high_vol_level;
 	}
 
 	snprintf(prop_name, MAX_PROP_SIZE,
@@ -1231,7 +1242,7 @@ static int sdhci_msm_dt_get_pad_drv_info(struct device *dev, int id,
 	drv_data->size = 3; /* array size for clk, cmd, data */
 
 	/* Allocate on, off configs for clk, cmd, data */
-	drv = devm_kzalloc(dev, 2 * drv_data->size *\
+	drv = devm_kzalloc(dev, 3 * drv_data->size *\
 			sizeof(struct sdhci_msm_pad_drv), GFP_KERNEL);
 	if (!drv) {
 		dev_err(dev, "No memory msm_mmc_pad_drv\n");
@@ -1240,6 +1251,7 @@ static int sdhci_msm_dt_get_pad_drv_info(struct device *dev, int id,
 	}
 	drv_data->on = drv;
 	drv_data->off = drv + drv_data->size;
+	drv_data->tune = drv + (drv_data->size * 2);
 
 	ret = sdhci_msm_dt_get_array(dev, "qcom,pad-drv-on",
 			&tmp, &len, drv_data->size);
@@ -1249,7 +1261,7 @@ static int sdhci_msm_dt_get_pad_drv_info(struct device *dev, int id,
 	for (i = 0; i < len; i++) {
 		drv_data->on[i].no = base + i;
 		drv_data->on[i].val = tmp[i];
-		dev_dbg(dev, "%s: val[%d]=0x%x\n", __func__,
+		dev_dbg(dev, "%s: on[%d]=0x%x\n", __func__,
 				i, drv_data->on[i].val);
 	}
 
@@ -1261,8 +1273,19 @@ static int sdhci_msm_dt_get_pad_drv_info(struct device *dev, int id,
 	for (i = 0; i < len; i++) {
 		drv_data->off[i].no = base + i;
 		drv_data->off[i].val = tmp[i];
-		dev_dbg(dev, "%s: val[%d]=0x%x\n", __func__,
+		dev_dbg(dev, "%s: off[%d]=0x%x\n", __func__,
 				i, drv_data->off[i].val);
+	}
+
+	if (!sdhci_msm_dt_get_array(dev, "qcom,pad-drv-tune",
+			&tmp, &len, drv_data->size)) {
+		for (i = 0; i < len; i++) {
+			drv_data->tune[i].no = base;
+			drv_data->tune[i].val = tmp[i];
+			dev_dbg(dev, "%s: tune[%d]=0x%x\n", __func__,
+					i, drv_data->tune[i].val);
+		}
+		drv_data->tune_size = len;
 	}
 
 	*pad_drv_data = drv_data;
@@ -1360,6 +1383,7 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev)
 	struct sdhci_msm_pltfm_data *pdata = NULL;
 	struct device_node *np = dev->of_node;
 	u32 bus_width = 0;
+	u32 drv_types = MMC_DRIVER_TYPE_0;
 	u32 cpu_dma_latency;
 	int len, i, mpm_int;
 	int clk_table_len;
@@ -1386,6 +1410,20 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev)
 		pdata->mmc_bus_width = 0;
 	}
 
+	if (!of_property_read_u32(np, "qcom,drv-types", &drv_types)) {
+		if (drv_types & MMC_DRIVER_TYPE_1)
+			pdata->caps |= MMC_CAP_DRIVER_TYPE_A;
+		if (drv_types & MMC_DRIVER_TYPE_2)
+			pdata->caps |= MMC_CAP_DRIVER_TYPE_C;
+		if (drv_types & MMC_DRIVER_TYPE_3)
+			pdata->caps |= MMC_CAP_DRIVER_TYPE_D;
+		if (drv_types & MMC_DRIVER_TYPE_4)
+			pdata->caps2 |= MMC_CAP2_DRIVER_TYPE_4;
+
+		/* More caps bits may be set by sdhci, so don't forget. */
+		pdata->drv_types = drv_types;
+	}
+
 	if (!of_property_read_u32(np, "qcom,cpu-dma-latency-us",
 				&cpu_dma_latency))
 		pdata->cpu_dma_latency_us = cpu_dma_latency;
@@ -1409,6 +1447,8 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev)
 		dev_err(dev, "failed to allocate memory for vreg data\n");
 		goto out;
 	}
+
+	mutex_init(&pdata->vreg_data->lock);
 
 	if (sdhci_msm_dt_parse_vreg_info(dev, &pdata->vreg_data->vdd_data,
 					 "vdd")) {
@@ -1451,7 +1491,26 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev)
 		else if (!strncmp(name, "DDR_1p2v", sizeof("DDR_1p2v")))
 			pdata->caps |= MMC_CAP_1_2V_DDR
 						| MMC_CAP_UHS_DDR50;
+		else if (!strncmp(name, "SDR104_1p8v", sizeof("SDR104_1p8v")))
+			pdata->caps |= MMC_CAP_1_8V_DDR
+						| MMC_CAP_UHS_SDR104;
+		else if (!strncmp(name, "SDR50_1p8v", sizeof("SDR50_1p8v")))
+			pdata->caps |= MMC_CAP_1_8V_DDR
+						| MMC_CAP_UHS_SDR50;
+		else if (!strncmp(name, "SDR25_1p8v", sizeof("SDR25_1p8v")))
+			pdata->caps |= MMC_CAP_1_8V_DDR
+						| MMC_CAP_UHS_SDR25;
+		else if (!strncmp(name, "SDR12_1p8v", sizeof("SDR12_1p8v")))
+			pdata->caps |= MMC_CAP_1_8V_DDR
+						| MMC_CAP_UHS_SDR12;
 	}
+
+	if (pdata->caps & MMC_CAP_UHS_SDR104)
+		pdata->caps |= MMC_CAP_UHS_SDR50;
+	if (pdata->caps & MMC_CAP_UHS_SDR50)
+		pdata->caps |= MMC_CAP_UHS_SDR25;
+	if (pdata->caps & MMC_CAP_UHS_SDR25)
+		pdata->caps |= MMC_CAP_UHS_SDR12;
 
 	if (of_get_property(np, "qcom,nonremovable", NULL))
 		pdata->nonremovable = true;
@@ -1461,6 +1520,9 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev)
 		pdata->mpm_sdiowakeup_int = mpm_int;
 	else
 		pdata->mpm_sdiowakeup_int = -1;
+
+	if (of_get_property(np, "qcom,emmc", NULL))
+		pdata->is_emmc = true;
 
 	return pdata;
 out:
@@ -1777,22 +1839,19 @@ static int sdhci_msm_vreg_enable(struct sdhci_msm_reg_data *vreg)
 	/* Put regulator in HPM (high power mode) */
 	ret = sdhci_msm_vreg_set_optimum_mode(vreg, vreg->hpm_uA);
 	if (ret < 0)
-		return ret;
+		goto out;
 
-	if (!vreg->is_enabled) {
-		/* Set voltage level */
-		ret = sdhci_msm_vreg_set_voltage(vreg, vreg->high_vol_level,
-						vreg->high_vol_level);
-		if (ret)
-			return ret;
-	}
+	/* Set voltage level */
+	ret = sdhci_msm_vreg_set_voltage(vreg, vreg->curr_vol_level,
+					 vreg->curr_vol_level);
+	if (ret)
+		goto out;
+
 	ret = regulator_enable(vreg->reg);
-	if (ret) {
-		pr_err("%s: regulator_enable(%s) failed. ret=%d\n",
-				__func__, vreg->name, ret);
-		return ret;
-	}
-	vreg->is_enabled = true;
+	if (ret)
+		pr_err("%s: failed to enable regulator %s: %d\n",
+			__func__, vreg->name, ret);
+out:
 	return ret;
 }
 
@@ -1801,52 +1860,41 @@ static int sdhci_msm_vreg_disable(struct sdhci_msm_reg_data *vreg)
 	int ret = 0;
 
 	/* Never disable regulator marked as always_on */
-	if (vreg->is_enabled && !vreg->is_always_on) {
-		ret = regulator_disable(vreg->reg);
-		if (ret) {
-			pr_err("%s: regulator_disable(%s) failed. ret=%d\n",
-				__func__, vreg->name, ret);
-			goto out;
-		}
-		vreg->is_enabled = false;
+	if (vreg->is_always_on) {
+		/* Always put always_on regulator in LPM (low power mode) */
+		if (vreg->lpm_sup)
+			ret = sdhci_msm_vreg_set_optimum_mode(vreg,
+							      vreg->lpm_uA);
+		goto out;
+	}
 
+	ret = regulator_disable(vreg->reg);
+	if (ret) {
+		pr_err("%s: failed to disable regulator %s: %d\n",
+			__func__, vreg->name, ret);
+		goto out;
+	}
+
+	if (!regulator_is_enabled(vreg->reg)) {
 		ret = sdhci_msm_vreg_set_optimum_mode(vreg, 0);
 		if (ret < 0)
 			goto out;
 
 		/* Set min. voltage level to 0 */
-		ret = sdhci_msm_vreg_set_voltage(vreg, 0, vreg->high_vol_level);
-		if (ret)
-			goto out;
-	} else if (vreg->is_enabled && vreg->is_always_on) {
-		if (vreg->lpm_sup) {
-			/* Put always_on regulator in LPM (low power mode) */
-			ret = sdhci_msm_vreg_set_optimum_mode(vreg,
-							      vreg->lpm_uA);
-			if (ret < 0)
-				goto out;
-		}
+		ret = sdhci_msm_vreg_set_voltage(vreg, 0, vreg->curr_vol_level);
 	}
 out:
 	return ret;
 }
 
-static int sdhci_msm_setup_vreg(struct sdhci_msm_pltfm_data *pdata,
-			bool enable, bool is_init)
+static int sdhci_msm_vreg_setup_slot(struct sdhci_msm_slot_reg_data *vreg_data,
+			bool enable)
 {
-	int ret = 0, i;
-	struct sdhci_msm_slot_reg_data *curr_slot;
 	struct sdhci_msm_reg_data *vreg_table[2];
+	int i, ret = 0;
 
-	curr_slot = pdata->vreg_data;
-	if (!curr_slot) {
-		pr_debug("%s: vreg info unavailable,assuming the slot is powered by always on domain\n",
-			 __func__);
-		goto out;
-	}
-
-	vreg_table[0] = curr_slot->vdd_data;
-	vreg_table[1] = curr_slot->vdd_io_data;
+	vreg_table[0] = vreg_data->vdd_data;
+	vreg_table[1] = vreg_data->vdd_io_data;
 
 	for (i = 0; i < ARRAY_SIZE(vreg_table); i++) {
 		if (vreg_table[i]) {
@@ -1859,6 +1907,38 @@ static int sdhci_msm_setup_vreg(struct sdhci_msm_pltfm_data *pdata,
 		}
 	}
 out:
+	return ret;
+}
+
+static int sdhci_msm_setup_vreg(struct sdhci_msm_pltfm_data *pdata,
+			bool enable, bool is_init)
+{
+	int ret = 0;
+	struct sdhci_msm_slot_reg_data *curr_slot;
+
+	curr_slot = pdata->vreg_data;
+	if (!curr_slot) {
+		pr_debug("%s: vreg info unavailable,assuming the slot is powered by always on domain\n",
+			 __func__);
+		return ret;
+	}
+
+	mutex_lock(&curr_slot->lock);
+
+	/* protect against extra disable from upper layers */
+	if (!enable && curr_slot->users == 0)
+		goto out;
+
+	ret = sdhci_msm_vreg_setup_slot(curr_slot, enable);
+	if (ret)
+		goto out;
+
+	if (enable)
+		curr_slot->users++;
+	else
+		curr_slot->users--;
+out:
+	mutex_unlock(&curr_slot->lock);
 	return ret;
 }
 
@@ -1933,13 +2013,16 @@ static int sdhci_msm_set_vdd_io_vol(struct sdhci_msm_pltfm_data *pdata,
 {
 	int ret = 0;
 	int set_level;
+	struct sdhci_msm_slot_reg_data *vreg_data = pdata->vreg_data;
 	struct sdhci_msm_reg_data *vdd_io_reg;
 
-	if (!pdata->vreg_data)
+	if (!vreg_data)
 		return ret;
 
-	vdd_io_reg = pdata->vreg_data->vdd_io_data;
-	if (vdd_io_reg && vdd_io_reg->is_enabled) {
+	mutex_lock(&vreg_data->lock);
+
+	vdd_io_reg = vreg_data->vdd_io_data;
+	if (vdd_io_reg && vreg_data->users > 0) {
 		switch (level) {
 		case VDD_IO_LOW:
 			set_level = vdd_io_reg->low_vol_level;
@@ -1954,11 +2037,15 @@ static int sdhci_msm_set_vdd_io_vol(struct sdhci_msm_pltfm_data *pdata,
 			pr_err("%s: invalid argument level = %d",
 					__func__, level);
 			ret = -EINVAL;
-			return ret;
+			goto out;
 		}
 		ret = sdhci_msm_vreg_set_voltage(vdd_io_reg, set_level,
-				set_level);
+						 set_level);
+		if (!ret)
+			vdd_io_reg->curr_vol_level = set_level;
 	}
+out:
+	mutex_unlock(&vreg_data->lock);
 	return ret;
 }
 
@@ -2607,6 +2694,125 @@ static int sdhci_msm_set_uhs_signaling(struct sdhci_host *host,
 	return 0;
 }
 
+static int sdhci_msm_tune_drive_strength(struct sdhci_host *host)
+{
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct sdhci_msm_host *msm_host = pltfm_host->priv;
+	struct sdhci_msm_pad_drv_data *drv =
+			msm_host->pdata->pin_data->pad_data->drv;
+
+	if (drv->tune_size == 0)
+		return -ENOSYS;
+	drv->tune_index++;
+	if (drv->tune_index >= drv->tune_size) {
+		pr_info("%s: no other drive strength tuning settings\n",
+			mmc_hostname(host->mmc));
+		drv->tune_index = 0;
+		return -EAGAIN;
+	}
+
+	/* Only supporting CLK for now */
+	drv->on[0].val = drv->tune[drv->tune_index].val;
+	pr_info("%s: tuning drive strength: %d\n",
+		mmc_hostname(host->mmc), drv->on[0].val);
+	msm_tlmm_set_hdrive(drv->tune[drv->tune_index].no,
+			    drv->tune[drv->tune_index].val);
+
+	return 0;
+}
+
+/*
+ * Simulate a device reset by toggling power on the slot.
+ */
+#define HW_RESET_DELAY_INCREMENT	5000
+#define HW_RESET_DELAY_RANGE		2000
+#define HW_RESET_DELAY_MAX		100000
+static void sdhci_msm_hw_reset(struct sdhci_host *host)
+{
+	struct mmc_card *card = host->mmc->card;
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct sdhci_msm_host *msm_host = pltfm_host->priv;
+	struct sdhci_msm_slot_reg_data *vreg_data = msm_host->pdata->vreg_data;
+	unsigned long delay = HW_RESET_DELAY_INCREMENT * 2;
+	int rc;
+
+	if (!vreg_data || (card && !mmc_card_sd(card)))
+		return;
+
+	mutex_lock(&vreg_data->lock);
+
+	/* No way to reset if we are already off */
+	if (vreg_data->users == 0) {
+		pr_warning("%s: host reset called with regulators off\n",
+			   mmc_hostname(host->mmc));
+		goto out;
+	}
+
+	if (card)
+		delay += card->failures * HW_RESET_DELAY_INCREMENT;
+	if (delay > HW_RESET_DELAY_MAX)
+		delay = HW_RESET_DELAY_MAX;
+	pr_debug("%s: host reset (%lu uS)\n", mmc_hostname(host->mmc), delay);
+
+	/*
+	 * Disable pwrsave so that we have a steady clock during init.
+	 */
+	writel_relaxed(readl_relaxed(host->ioaddr + CORE_VENDOR_SPEC) &
+		~CORE_CLK_PWRSAVE, host->ioaddr + CORE_VENDOR_SPEC);
+
+	/*
+	 * We bug-out on any failure, since there is no safe way to recover.
+	 */
+	rc = sdhci_msm_vreg_setup_slot(vreg_data, false);
+	if (rc) {
+		pr_err("%s: %s disable regulator: failed: %d\n",
+		       mmc_hostname(host->mmc), __func__, rc);
+		BUG_ON(rc);
+	}
+
+	/* Let the rails drain. */
+	usleep_range(delay, delay + HW_RESET_DELAY_RANGE);
+
+	rc = sdhci_msm_vreg_setup_slot(vreg_data, true);
+	if (rc) {
+		pr_err("%s: %s enable regulator: failed: %d\n",
+		       mmc_hostname(host->mmc), __func__, rc);
+		BUG_ON(rc);
+	}
+
+	/* Let the rails settle. */
+	usleep_range(delay, delay + HW_RESET_DELAY_RANGE);
+
+out:
+	mutex_unlock(&vreg_data->lock);
+}
+
+static int sdhci_msm_select_drive_strength(struct sdhci_host *host,
+		int host_drv, int card_drv)
+{
+	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+	struct sdhci_msm_host *msm_host = pltfm_host->priv;
+	int drv_type = msm_host->pdata->drv_types & host_drv & card_drv;
+
+	pr_debug("%s: %s plat=0x%02X, host=0x%02X, card=0x%02X\n",
+		       mmc_hostname(host->mmc), __func__,
+		       msm_host->pdata->drv_types, host_drv, card_drv);
+	/* Choose the lowest drive strength that everyone can agree on. */
+	if (drv_type & SD_DRIVER_TYPE_D)
+		return MMC_SET_DRIVER_TYPE_D;	/* 100 ohms */
+	if (drv_type & SD_DRIVER_TYPE_C)
+		return MMC_SET_DRIVER_TYPE_C;	/* 66 ohms */
+	if (drv_type & SD_DRIVER_TYPE_B)
+		return MMC_SET_DRIVER_TYPE_B;	/* 50 ohms */
+	if (drv_type & MMC_DRIVER_TYPE_4)
+		return MMC_SET_DRIVER_TYPE_4;	/* 40 ohms */
+	if (drv_type & SD_DRIVER_TYPE_A)
+		return MMC_SET_DRIVER_TYPE_A;	/* 33 ohms */
+
+	/* No agreement, so return the default (50 ohms). */
+	return MMC_SET_DRIVER_TYPE_B;
+}
+
 /*
  * sdhci_msm_disable_data_xfer - disable undergoing AHB bus data transfer
  *
@@ -2667,6 +2873,9 @@ static struct sdhci_ops sdhci_msm_ops = {
 	.set_clock = sdhci_msm_set_clock,
 	.get_min_clock = sdhci_msm_get_min_clock,
 	.get_max_clock = sdhci_msm_get_max_clock,
+	.tune_drive_strength = sdhci_msm_tune_drive_strength,
+	.hw_reset = sdhci_msm_hw_reset,
+	.select_drive_strength = sdhci_msm_select_drive_strength,
 	.disable_data_xfer = sdhci_msm_disable_data_xfer,
 	.enable_controller_clock = sdhci_msm_enable_controller_clock,
 };
@@ -2713,6 +2922,7 @@ static int __devinit sdhci_msm_probe(struct platform_device *pdev)
 	u32 vdd_max_current;
 	u16 host_version;
 	u32 pwr, irq_status, irq_ctl;
+	u32 sdhci_caps;
 	unsigned long flags;
 
 	pr_debug("%s: Enter %s\n", dev_name(&pdev->dev), __func__);
@@ -2958,6 +3168,7 @@ static int __devinit sdhci_msm_probe(struct platform_device *pdev)
 	/* Set host capabilities */
 	msm_host->mmc->caps |= msm_host->pdata->mmc_bus_width;
 	msm_host->mmc->caps |= msm_host->pdata->caps;
+	msm_host->mmc->caps |= MMC_CAP_HW_RESET;
 
 	vdd_max_current = sdhci_msm_get_vreg_vdd_max_current(msm_host);
 	if (vdd_max_current >= 800)
@@ -2978,8 +3189,7 @@ static int __devinit sdhci_msm_probe(struct platform_device *pdev)
 	msm_host->mmc->caps2 |= MMC_CAP2_CORE_RUNTIME_PM;
 	msm_host->mmc->caps2 |= MMC_CAP2_PACKED_WR;
 	msm_host->mmc->caps2 |= MMC_CAP2_PACKED_WR_CONTROL;
-	msm_host->mmc->caps2 |= (MMC_CAP2_BOOTPART_NOACC |
-				MMC_CAP2_DETECT_ON_ERR);
+	msm_host->mmc->caps2 |= MMC_CAP2_BOOTPART_NOACC;
 	msm_host->mmc->caps2 |= MMC_CAP2_SANITIZE;
 	msm_host->mmc->caps2 |= MMC_CAP2_CACHE_CTRL;
 	msm_host->mmc->caps2 |= MMC_CAP2_POWEROFF_NOTIFY;
@@ -2991,6 +3201,28 @@ static int __devinit sdhci_msm_probe(struct platform_device *pdev)
 
 	if (msm_host->pdata->nonremovable)
 		msm_host->mmc->caps |= MMC_CAP_NONREMOVABLE;
+
+	if (msm_host->pdata->is_emmc)
+		msm_host->mmc->caps2 |= MMC_CAP2_MMC_ONLY;
+
+	if (mmc_host_uhs(msm_host->mmc)) {
+		sdhci_caps = readl_relaxed(host->ioaddr + SDHCI_CAPABILITIES_1);
+
+		if ((sdhci_caps & SDHCI_SUPPORT_SDR104) &&
+			!(host->mmc->caps & MMC_CAP_UHS_SDR104))
+			sdhci_caps &= ~SDHCI_SUPPORT_SDR104;
+
+		if ((sdhci_caps & SDHCI_SUPPORT_DDR50) &&
+			!(host->mmc->caps & MMC_CAP_UHS_DDR50))
+			sdhci_caps &= ~SDHCI_SUPPORT_DDR50;
+
+		if ((sdhci_caps & SDHCI_SUPPORT_SDR50) &&
+			!(host->mmc->caps & MMC_CAP_UHS_SDR50))
+			sdhci_caps &= ~SDHCI_SUPPORT_SDR50;
+
+		sdhci_caps |= ((host_version & 0xFF) << 24);
+		sdhci_writel(host, sdhci_caps, CORE_VENDOR_SPEC_CAPABILITIES1);
+	}
 
 	host->cpu_dma_latency_us = msm_host->pdata->cpu_dma_latency_us;
 
@@ -3066,6 +3298,8 @@ static int __devinit sdhci_msm_probe(struct platform_device *pdev)
 		       mmc_hostname(host->mmc), __func__, ret);
 	else if (mmc_use_core_runtime_pm(host->mmc))
 		pm_runtime_enable(&pdev->dev);
+
+	sdhci_msm_set_clock(host, 0);
 
 	if (msm_host->pdata->mpm_sdiowakeup_int != -1) {
 		ret = sdhci_msm_cfg_mpm_pin_wakeup(host, SDC_DAT1_ENABLE);

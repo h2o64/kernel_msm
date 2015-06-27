@@ -356,6 +356,12 @@ struct msm_sensor_info_t {
 	enum camb_position_t position;
 };
 
+#ifdef CONFIG_MSMB_CAMERA_MOTO
+struct msm_camera_gpio_num_info {
+	uint16_t gpio_num[SENSOR_GPIO_MAX];
+};
+#endif
+
 struct camera_vreg_t {
 	const char *reg_name;
 	enum camera_vreg_type type;
@@ -595,6 +601,8 @@ enum af_camera_name {
 	ACTUATOR_MAIN_CAM_3,
 	ACTUATOR_MAIN_CAM_4,
 	ACTUATOR_MAIN_CAM_5,
+	ACTUATOR_MAIN_CAM_6,
+	ACTUATOR_MAIN_CAM_7,
 	ACTUATOR_WEB_CAM_0,
 	ACTUATOR_WEB_CAM_1,
 	ACTUATOR_WEB_CAM_2,

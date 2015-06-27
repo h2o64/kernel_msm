@@ -99,7 +99,7 @@ enum {
 
 static const DECLARE_TLV_DB_SCALE(digital_gain, 0, 1, 0);
 static const DECLARE_TLV_DB_SCALE(line_gain, 0, 7, 1);
-static const DECLARE_TLV_DB_SCALE(analog_gain, 0, 25, 1);
+static const DECLARE_TLV_DB_SCALE(analog_gain, 0, 5, 1);
 static struct snd_soc_dai_driver msm8x10_wcd_i2s_dai[];
 static const DECLARE_TLV_DB_SCALE(aux_pga_gain, 0, 2, 0);
 
@@ -167,6 +167,12 @@ static char on_demand_supply_name[][MAX_ON_DEMAND_SUPPLY_NAME_LENGTH] = {
 	"cdc-vdda-cp",
 };
 
+#define CODEC_MICBIAS_MASK		0xF
+#define CODEC_MICBIAS_INTERNAL1		0x1
+#define CODEC_MICBIAS_INTERNAL2		0x2
+#define CODEC_MICBIAS_INTERNAL3		0x4
+#define CODEC_MICBIAS_EXTERNAL		0x8
+
 static int on_demand_regulator_control(struct on_demand_supply *supply,
 				       bool enable,
 				       u8 shift);
@@ -175,6 +181,7 @@ struct msm8x10_wcd_priv {
 	struct snd_soc_codec *codec;
 	u32 adc_count;
 	u32 rx_bias_count;
+	u32 codec_en_bits;
 	s32 dmic_1_2_clk_cnt;
 	struct on_demand_supply on_demand_list[ON_DEMAND_SUPPLIES_MAX];
 	/* resmgr module */
@@ -938,7 +945,22 @@ static int msm8x10_wcd_pa_gain_put(struct snd_kcontrol *kcontrol,
 		ear_pa_gain = 0x00;
 		break;
 	case 1:
+		ear_pa_gain = 0x20;
+		break;
+	case 2:
+		ear_pa_gain = 0x40;
+		break;
+	case 3:
+		ear_pa_gain = 0x60;
+		break;
+	case 4:
 		ear_pa_gain = 0x80;
+		break;
+	case 5:
+		ear_pa_gain = 0xA0;
+		break;
+	case 6:
+		ear_pa_gain = 0xE0;
 		break;
 	default:
 		return -EINVAL;
@@ -1145,9 +1167,10 @@ static int msm8x10_wcd_put_iir_band_audio_mixer(
 }
 
 static const char * const msm8x10_wcd_ear_pa_gain_text[] = {
-		"POS_6_DB", "POS_2_DB"};
+	"POS_6_DB", "POS_4P5_DB", "POS_3_DB", "POS_1P5_DB",
+	"POS_0_DB", "NEG_2P5_DB", "NEG_12_DB"};
 static const struct soc_enum msm8x10_wcd_ear_pa_gain_enum[] = {
-		SOC_ENUM_SINGLE_EXT(2, msm8x10_wcd_ear_pa_gain_text),
+	SOC_ENUM_SINGLE_EXT(7, msm8x10_wcd_ear_pa_gain_text),
 };
 
 /*cut of frequency for high pass filter*/
@@ -1219,6 +1242,15 @@ static const struct snd_kcontrol_new msm8x10_wcd_snd_controls[] = {
 	SOC_SINGLE_S8_TLV("IIR1 INP4 Volume",
 			  MSM8X10_WCD_A_CDC_IIR1_GAIN_B4_CTL,
 			  -84,	40, digital_gain),
+	SOC_SINGLE_TLV("ADC1 Volume",
+			  MSM8X10_WCD_A_TX_1_EN,
+			  2, 19, 0, analog_gain),
+	SOC_SINGLE_TLV("ADC2 Volume",
+			  MSM8X10_WCD_A_TX_2_EN,
+			  2, 19, 0, analog_gain),
+	SOC_SINGLE_TLV("ADC3 Volume",
+			  MSM8X10_WCD_A_TX_3_EN,
+			  2, 19, 0, analog_gain),
 
 	SOC_ENUM("TX1 HPF cut off", cf_dec1_enum),
 	SOC_ENUM("TX2 HPF cut off", cf_dec2_enum),
@@ -1514,6 +1546,29 @@ static const struct snd_kcontrol_new spkr_switch[] = {
 	SOC_DAPM_SINGLE("Switch", MSM8X10_WCD_A_SPKR_DRV_DAC_CTL, 2, 1, 0)
 };
 
+static void msm8x10_wcd_codec_set_optimum_mode(struct msm8x10_wcd *msm8x10,
+						char *name,
+						int mode)
+{
+	int i;
+	int load_uA;
+	struct msm8x10_wcd_pdata *pdata = dev_get_platdata(msm8x10->dev);
+
+	for (i = 0; i < msm8x10->num_of_supplies; i++) {
+		if (strcmp(msm8x10->supplies[i].supply, name))
+			continue;
+
+		if (mode == REGULATOR_MODE_IDLE)
+			load_uA = 0;
+		else
+			load_uA =  pdata->regulator[i].optimum_uA;
+
+		regulator_set_optimum_mode(msm8x10->supplies[i].consumer,
+					   load_uA);
+		break;
+	}
+}
+
 static void msm8x10_wcd_codec_enable_adc_block(struct snd_soc_codec *codec,
 					 int enable)
 {
@@ -1668,6 +1723,7 @@ static int msm8x10_wcd_codec_enable_micbias(struct snd_soc_dapm_widget *w,
 {
 	struct snd_soc_codec *codec = w->codec;
 	struct msm8x10_wcd_priv *msm8x10_wcd = snd_soc_codec_get_drvdata(codec);
+	struct msm8x10_wcd *msm8x10 = codec->control_data;
 	u16 micb_int_reg;
 	char *internal1_text = "Internal1";
 	char *internal2_text = "Internal2";
@@ -1696,12 +1752,17 @@ static int msm8x10_wcd_codec_enable_micbias(struct snd_soc_dapm_widget *w,
 		/* Let MBHC module know micbias is about to turn ON */
 		wcd9xxx_resmgr_notifier_call(&msm8x10_wcd->resmgr, e_pre_on);
 
-		if (strnstr(w->name, internal1_text, 30))
+		if (strnstr(w->name, internal1_text, 30)) {
 			snd_soc_update_bits(codec, micb_int_reg, 0x80, 0x80);
-		else if (strnstr(w->name, internal2_text, 30))
+			msm8x10_wcd->codec_en_bits |= CODEC_MICBIAS_INTERNAL1;
+		} else if (strnstr(w->name, internal2_text, 30)) {
 			snd_soc_update_bits(codec, micb_int_reg, 0x10, 0x10);
-		else if (strnstr(w->name, internal3_text, 30))
+			msm8x10_wcd->codec_en_bits |= CODEC_MICBIAS_INTERNAL2;
+		} else if (strnstr(w->name, internal3_text, 30)) {
 			snd_soc_update_bits(codec, micb_int_reg, 0x2, 0x2);
+			msm8x10_wcd->codec_en_bits |= CODEC_MICBIAS_INTERNAL3;
+		} else
+			msm8x10_wcd->codec_en_bits |= CODEC_MICBIAS_EXTERNAL;
 
 		/* Always pull up TxFe for TX2 to Micbias */
 		snd_soc_update_bits(codec, micb_int_reg, 0x04, 0x04);
@@ -1710,6 +1771,10 @@ static int msm8x10_wcd_codec_enable_micbias(struct snd_soc_dapm_widget *w,
 					0x80, 0x80);
 		pr_debug("%s micb_en_count : %d", __func__,
 				msm8x10_wcd->micb_en_count);
+
+		msm8x10_wcd_codec_set_optimum_mode(msm8x10,
+				on_demand_supply_name[ON_DEMAND_MICBIAS],
+				REGULATOR_MODE_NORMAL);
 		break;
 	case SND_SOC_DAPM_POST_PMU:
 		usleep_range(20000, 20100);
@@ -1725,15 +1790,25 @@ static int msm8x10_wcd_codec_enable_micbias(struct snd_soc_dapm_widget *w,
 		/* Let MBHC module know so micbias switch to be off */
 		wcd9xxx_resmgr_notifier_call(&msm8x10_wcd->resmgr, e_post_off);
 
-		if (strnstr(w->name, internal1_text, 30))
+		if (strnstr(w->name, internal1_text, 30)) {
 			snd_soc_update_bits(codec, micb_int_reg, 0x80, 0x00);
-		else if (strnstr(w->name, internal2_text, 30))
+			msm8x10_wcd->codec_en_bits &= ~CODEC_MICBIAS_INTERNAL1;
+		} else if (strnstr(w->name, internal2_text, 30)) {
 			snd_soc_update_bits(codec, micb_int_reg, 0x10, 0x00);
-		else if (strnstr(w->name, internal3_text, 30))
+			msm8x10_wcd->codec_en_bits &= ~CODEC_MICBIAS_INTERNAL2;
+		} else if (strnstr(w->name, internal3_text, 30)) {
 			snd_soc_update_bits(codec, micb_int_reg, 0x2, 0x0);
+			msm8x10_wcd->codec_en_bits &= ~CODEC_MICBIAS_INTERNAL3;
+		} else
+			msm8x10_wcd->codec_en_bits &= ~CODEC_MICBIAS_EXTERNAL;
 
 		/* Disable pull up TxFe for TX2 to Micbias */
 		snd_soc_update_bits(codec, micb_int_reg, 0x04, 0x00);
+
+		if (!(msm8x10_wcd->codec_en_bits & CODEC_MICBIAS_MASK))
+			msm8x10_wcd_codec_set_optimum_mode(msm8x10,
+				on_demand_supply_name[ON_DEMAND_MICBIAS],
+				REGULATOR_MODE_IDLE);
 		break;
 	}
 	return 0;
@@ -2643,6 +2718,7 @@ static const struct msm8x10_wcd_reg_mask_val msm8x10_wcd_reg_defaults[] = {
 	/* Disable internal biasing path which can cause leakage */
 	MSM8X10_WCD_REG_VAL(MSM8X10_WCD_A_BIAS_CURR_CTL_2, 0x04),
 
+	MSM8X10_WCD_REG_VAL(MSM8X10_WCD_A_MICB_CFILT_1_VAL, 0x70),
 	MSM8X10_WCD_REG_VAL(MSM8X10_WCD_A_TX_COM_BIAS, 0xE0),
 	/* Keep the same default gain settings for TX paths */
 	MSM8X10_WCD_REG_VAL(MSM8X10_WCD_A_TX_1_EN, 0x32),
@@ -2819,6 +2895,7 @@ static int msm8x10_wcd_enable_ext_mb_source(struct snd_soc_codec *codec,
 	return ret;
 }
 
+#if !defined(CONFIG_SND_SOC_TPA6165A2) && !defined(CONFIG_SND_SOC_FSA8500)
 static int msm8x10_wcd_enable_mbhc_micbias(struct snd_soc_codec *codec,
 					   bool enable,
 					   enum wcd9xxx_micbias_num micb_num)
@@ -2848,6 +2925,7 @@ err:
 			enable ? "enable" : "disable");
 	return rc;
 }
+#endif
 
 static void msm8x10_wcd_micb_internal(struct snd_soc_codec *codec, bool on)
 {
@@ -3336,6 +3414,7 @@ static int msm8x10_wcd_codec_probe(struct snd_soc_codec *codec)
 
 	msm8x10_wcd_priv->micb_en_count = 0;
 
+#if !defined(CONFIG_SND_SOC_TPA6165A2) && !defined(CONFIG_SND_SOC_FSA8500)
 	ret = wcd9xxx_mbhc_init(&msm8x10_wcd_priv->mbhc,
 				&msm8x10_wcd_priv->resmgr,
 				codec, msm8x10_wcd_enable_mbhc_micbias,
@@ -3346,6 +3425,7 @@ static int msm8x10_wcd_codec_probe(struct snd_soc_codec *codec)
 			__func__);
 		goto exit_probe;
 	}
+#endif
 
 	/* Handle the Pdata */
 	ret = msm8x10_wcd_handle_pdata(codec, pdata);

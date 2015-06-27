@@ -1046,20 +1046,29 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 int
 fb_blank(struct fb_info *info, int blank)
 {	
- 	int ret = -EINVAL;
+	struct fb_event event;
+	int ret = -EINVAL, early_ret;
 
  	if (blank > FB_BLANK_POWERDOWN)
  		blank = FB_BLANK_POWERDOWN;
 
+	event.info = info;
+	event.data = &blank;
+
+	early_ret = fb_notifier_call_chain(FB_EARLY_EVENT_BLANK, &event);
+
 	if (info->fbops->fb_blank)
  		ret = info->fbops->fb_blank(blank, info);
 
- 	if (!ret) {
-		struct fb_event event;
-
-		event.info = info;
-		event.data = &blank;
+	if (!ret)
 		fb_notifier_call_chain(FB_EVENT_BLANK, &event);
+	else {
+		/*
+		 * if fb_blank is failed then revert effects of
+		 * the early blank event.
+		 */
+		if (!early_ret)
+			fb_notifier_call_chain(FB_R_EARLY_EVENT_BLANK, &event);
 	}
 
  	return ret;
@@ -1437,7 +1446,11 @@ __releases(&info->lock)
 		goto out;
 	}
 	file->private_data = info;
-	if (info->fbops->fb_open) {
+	if (info->fbops->fb_open2) {
+		res = info->fbops->fb_open2(info, file, 1);
+		if (res)
+			module_put(info->fbops->owner);
+	} else if (info->fbops->fb_open) {
 		res = info->fbops->fb_open(info,1);
 		if (res)
 			module_put(info->fbops->owner);
@@ -1461,7 +1474,9 @@ __releases(&info->lock)
 	struct fb_info * const info = file->private_data;
 
 	mutex_lock(&info->lock);
-	if (info->fbops->fb_release)
+	if (info->fbops->fb_release2)
+		info->fbops->fb_release2(info, file, 1);
+	else if (info->fbops->fb_release)
 		info->fbops->fb_release(info,1);
 	module_put(info->fbops->owner);
 	mutex_unlock(&info->lock);

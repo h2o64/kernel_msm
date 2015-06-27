@@ -33,6 +33,13 @@ config GENERIC_IO
 	boolean
 	default n
 
+config SPINLOCK_TIMEOUT_EXT
+	bool "debug spinlock with extended timeout"
+	default n
+	help
+	  This debug option is provided for the cases where spinlock contention
+	  is severe.
+
 config CRC_CCITT
 	tristate "CRC-CCITT functions"
 	help
@@ -177,6 +184,15 @@ config LZO_COMPRESS
 config LZO_DECOMPRESS
 	tristate
 
+config LZ4_COMPRESS
+	tristate
+
+config LZ4HC_COMPRESS
+	tristate
+
+config LZ4_DECOMPRESS
+	tristate
+
 source "lib/xz/Kconfig"
 
 #
@@ -199,6 +215,10 @@ config DECOMPRESS_XZ
 
 config DECOMPRESS_LZO
 	select LZO_DECOMPRESS
+	tristate
+
+config DECOMPRESS_LZ4
+	select LZ4_DECOMPRESS
 	tristate
 
 #
@@ -393,5 +413,13 @@ config QMI_ENCDEC_DEBUG
 	  Kernel config option to enable debugging QMI Encode/Decode
 	  library. This will log the information regarding the element
 	  and message being encoded & decoded.
+
+config MOT_PATCH_KERNEL
+	bool "Provide capability to patch the kernel after decompression"
+	help
+	  Provide ability to quickly patch initialization variables and simple
+	  logic defects after the zImage has been decompressed. The patch data
+	  can be passed in via the ATAG pointer which will be re-adjusted if
+	  patch data is found.
 
 endmenu

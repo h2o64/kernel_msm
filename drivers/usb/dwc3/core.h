@@ -793,6 +793,7 @@ struct dwc3 {
 	void (*notify_event) (struct dwc3 *, unsigned);
 	int			tx_fifo_size;
 	bool			tx_fifo_reduced;
+	int                     charge_enabled; /* unconditional charging */
 	bool			err_evt_seen;
 	unsigned long		irq_cnt;
 };

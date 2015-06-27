@@ -39,8 +39,10 @@
 #include <linux/pm_wakeup.h>
 #include <linux/power_supply.h>
 #include <linux/qpnp/qpnp-adc.h>
+#include <linux/qpnp/pin.h>
 #include <linux/cdev.h>
 #include <linux/completion.h>
+#include <linux/of_gpio.h>
 
 #include <mach/rpm-regulator.h>
 #include <mach/rpm-regulator-smd.h>
@@ -74,7 +76,7 @@ module_param(ss_phy_override_deemphasis, int, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(ss_phy_override_deemphasis, "Override SSPHY demphasis value");
 
 /* Enable Proprietary charger detection */
-static bool prop_chg_detect;
+static bool prop_chg_detect = true;
 module_param(prop_chg_detect, bool, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(prop_chg_detect, "Enable Proprietary charger detection");
 
@@ -165,6 +167,15 @@ MODULE_PARM_DESC(prop_chg_detect, "Enable Proprietary charger detection");
 #define PWR_EVNT_IRQ_STAT_REG    (QSCRATCH_REG_OFFSET + 0x58)
 #define PWR_EVNT_IRQ_MASK_REG    (QSCRATCH_REG_OFFSET + 0x5C)
 
+#define DWC3_ID_STATUS_DELAY        150 /* 150 msec */
+#define DWC3_VBUS_IN_THRESH         1000000 /* 1V */
+#define DWC3_ID_GND_THRESH          400000  /* 400 mV */
+#define DWC3_ID_DEFAULT_VOLTS       1000000 /* 1V */
+
+/* Number of failures before ignoring Voltage Requests */
+#define DWC3_HVDCP_MAX_FAILURES     5
+#define DWC3_HVDCP_FAIL_MAX_VOLTS   5000000
+
 struct dwc3_msm_req_complete {
 	struct list_head list_item;
 	struct usb_request *req;
@@ -215,7 +226,12 @@ struct dwc3_msm {
 	struct delayed_work	chg_work;
 	enum usb_chg_state	chg_state;
 	int			pmic_id_irq;
-	struct work_struct	id_work;
+	bool                    id_irq_enabled;
+	unsigned int		pmic_id_gpio;
+	unsigned int		pmic_id_vin;
+	unsigned int		pmic_id_pull;
+	unsigned int		pmic_id_amux_chan;
+	struct delayed_work	id_work;
 	struct qpnp_adc_tm_btm_param	adc_param;
 	struct qpnp_adc_tm_chip *adc_tm_dev;
 	struct delayed_work	init_adc_work;
@@ -251,6 +267,10 @@ struct dwc3_msm {
 	bool ext_chg_opened;
 	bool ext_chg_active;
 	struct completion ext_chg_wait;
+	unsigned int		hvdcp_chrg_mode;
+	int			hvdcp_chrg_stat;
+	int			hvdcp_failures;
+	bool                    defer_read_id;
 };
 
 #define USB_HSPHY_3P3_VOL_MIN		3050000 /* uV */
@@ -1842,11 +1862,11 @@ static void dwc3_chg_detect_work(struct work_struct *w)
 			dwc3_msm_write_readback(mdwc->base,
 					CHARGING_DET_CTRL_REG, 0x1F, 0x10);
 			if (mdwc->ext_chg_opened) {
-				init_completion(&mdwc->ext_chg_wait);
+				complete(&mdwc->ext_chg_wait);
 				mdwc->ext_chg_active = true;
 			}
 		}
-		dev_dbg(mdwc->dev, "chg_type = %s\n",
+		dev_info(mdwc->dev, "chg_type = %s\n",
 			chg_to_string(mdwc->charger.chg_type));
 		mdwc->charger.notify_detection_complete(mdwc->otg_xceiv->otg,
 								&mdwc->charger);
@@ -1867,6 +1887,8 @@ static void dwc3_start_chg_det(struct dwc3_charger *charger, bool start)
 		cancel_delayed_work_sync(&mdwc->chg_work);
 		mdwc->chg_state = USB_CHG_STATE_UNDEFINED;
 		charger->chg_type = DWC3_INVALID_CHARGER;
+		mdwc->hvdcp_chrg_mode = USB_REQUEST_MODE_NONE;
+		mdwc->hvdcp_chrg_stat = USB_REQUEST_STAT_PENDING;
 		return;
 	}
 
@@ -2356,6 +2378,64 @@ get_prop_usbin_voltage_now(struct dwc3_msm *mdwc)
 	}
 }
 
+static int
+get_prop_usbid_voltage_now(struct dwc3_msm *mdwc)
+{
+	int rc = 0;
+	struct qpnp_vadc_result results;
+	struct qpnp_pin_cfg id_pin_cfg;
+	int enable_id = 0;
+	int id_voltage;
+
+	/* Disable ID irq before voltage measurement to prevent triggering */
+	if (mdwc->id_irq_enabled) {
+		disable_irq(mdwc->pmic_id_irq);
+		mdwc->id_irq_enabled = false;
+		enable_id = 1;
+	}
+
+	/* Switch ID Pin to Analog IN */
+	memset(&id_pin_cfg, 0 , sizeof(id_pin_cfg));
+	id_pin_cfg.mode = QPNP_PIN_MODE_AIN;
+	id_pin_cfg.ain_route = mdwc->pmic_id_amux_chan;
+	id_pin_cfg.master_en  = QPNP_PIN_MASTER_ENABLE;
+	qpnp_pin_config(mdwc->pmic_id_gpio, &id_pin_cfg);
+
+	if (IS_ERR_OR_NULL(mdwc->vadc_dev)) {
+		mdwc->vadc_dev = qpnp_get_vadc(mdwc->dev, "usbin");
+		if (IS_ERR(mdwc->vadc_dev)) {
+			id_voltage = DWC3_ID_DEFAULT_VOLTS;
+			goto reset_pin;
+		}
+	}
+
+	rc = qpnp_vadc_read(mdwc->vadc_dev, P_MUX2_1_1, &results);
+	if (rc) {
+		pr_err("Unable to read usbid rc=%d\n", rc);
+		id_voltage =  DWC3_ID_DEFAULT_VOLTS;
+	} else {
+		id_voltage = results.physical;
+	}
+
+reset_pin:
+	/* Switch ID Pin to Digital IN */
+	memset(&id_pin_cfg, 0 , sizeof(id_pin_cfg));
+	id_pin_cfg.mode = QPNP_PIN_MODE_DIG_IN;
+	id_pin_cfg.vin_sel = mdwc->pmic_id_vin;
+	id_pin_cfg.pull = mdwc->pmic_id_pull;
+	id_pin_cfg.master_en  = QPNP_PIN_MASTER_ENABLE;
+	qpnp_pin_config(mdwc->pmic_id_gpio, &id_pin_cfg);
+
+	/* Leave ID irq enabled if enabled before voltage measurement */
+	if (enable_id) {
+		enable_irq(mdwc->pmic_id_irq);
+		mdwc->id_irq_enabled = true;
+	}
+
+	pr_debug("id_voltage = %d\n", id_voltage);
+	return id_voltage;
+}
+
 static int dwc3_msm_power_get_property_usb(struct power_supply *psy,
 				  enum power_supply_property psp,
 				  union power_supply_propval *val)
@@ -2367,7 +2447,10 @@ static int dwc3_msm_power_get_property_usb(struct power_supply *psy,
 		val->intval = mdwc->host_mode;
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
-		val->intval = mdwc->voltage_max;
+		if (mdwc->hvdcp_failures >= DWC3_HVDCP_MAX_FAILURES)
+			val->intval = DWC3_HVDCP_FAIL_MAX_VOLTS;
+		else
+			val->intval = mdwc->voltage_max;
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
 		val->intval = mdwc->current_max;
@@ -2384,6 +2467,35 @@ static int dwc3_msm_power_get_property_usb(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
 		val->intval = get_prop_usbin_voltage_now(mdwc);
 		break;
+	case POWER_SUPPLY_PROP_POWER_NOW:
+		if (mdwc->hvdcp_chrg_mode == USB_REQUEST_MODE_5V) {
+			if (mdwc->hvdcp_chrg_stat ==
+			    USB_REQUEST_STAT_SUCCESS)
+				val->intval = USB_REQUEST_MODE_5V;
+			else if (mdwc->hvdcp_chrg_stat ==
+				 USB_REQUEST_STAT_FAIL)
+				val->intval = USB_REQUEST_MODE_NONE;
+			else if (mdwc->hvdcp_chrg_stat ==
+				 USB_REQUEST_STAT_PENDING)
+				val->intval = USB_REQUEST_MODE_PENDING;
+		} else if (mdwc->hvdcp_chrg_mode == USB_REQUEST_MODE_9V) {
+			if (mdwc->hvdcp_chrg_stat ==
+			    USB_REQUEST_STAT_SUCCESS)
+				val->intval = USB_REQUEST_MODE_9V;
+			else if (mdwc->hvdcp_chrg_stat ==
+				 USB_REQUEST_STAT_FAIL)
+				val->intval = USB_REQUEST_MODE_NONE;
+			else if (mdwc->hvdcp_chrg_stat ==
+				 USB_REQUEST_STAT_PENDING)
+				val->intval = USB_REQUEST_MODE_PENDING;
+		} else {
+			val->intval = USB_REQUEST_MODE_NONE;
+		}
+
+		break;
+	case POWER_SUPPLY_PROP_LOW_POWER:
+		val->intval = atomic_read(&mdwc->in_lpm);
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -2395,6 +2507,7 @@ static int dwc3_msm_power_set_property_usb(struct power_supply *psy,
 				  const union power_supply_propval *val)
 {
 	static bool init;
+	unsigned long flags;
 	struct dwc3_msm *mdwc = container_of(psy, struct dwc3_msm,
 								usb_psy);
 
@@ -2412,6 +2525,10 @@ static int dwc3_msm_power_set_property_usb(struct power_supply *psy,
 				break;
 
 			mdwc->ext_xceiv.bsv = val->intval;
+			/* Kick the phone out of host mode if vbus is on */
+			if (val->intval && (mdwc->ext_xceiv.id == DWC3_ID_GROUND))
+				mdwc->ext_xceiv.id = mdwc->id_state =
+								DWC3_ID_FLOAT;
 			/*
 			 * set debouncing delay to 120msec. Otherwise battery
 			 * charging CDP complaince test fails if delay > 120ms.
@@ -2422,6 +2539,36 @@ static int dwc3_msm_power_set_property_usb(struct power_supply *psy,
 			if (!init)
 				init = true;
 		}
+		mdwc->hvdcp_failures = 0;
+
+		if (!mdwc->pmic_id_irq)
+			break;
+
+		/* read id value at powerup */
+		if (mdwc->defer_read_id) {
+			mdwc->defer_read_id = false;
+			local_irq_save(flags);
+			/* Update initial ID state */
+			mdwc->id_state =
+				!!irq_read_line(mdwc->pmic_id_irq);
+			if (mdwc->id_state == DWC3_ID_GROUND &&
+						!mdwc->vbus_active)
+				queue_delayed_work(system_nrt_wq,
+						&mdwc->id_work,
+						msecs_to_jiffies(
+							DWC3_ID_STATUS_DELAY));
+			local_irq_restore(flags);
+		}
+
+		/* Disable ID interrupts when vbus is active */
+		if (mdwc->vbus_active && mdwc->id_irq_enabled) {
+			disable_irq(mdwc->pmic_id_irq);
+			mdwc->id_irq_enabled = false;
+		} else if (!mdwc->vbus_active && !mdwc->id_irq_enabled) {
+			enable_irq(mdwc->pmic_id_irq);
+			mdwc->id_irq_enabled = true;
+		}
+
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
 		mdwc->online = val->intval;
@@ -2435,6 +2582,21 @@ static int dwc3_msm_power_set_property_usb(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_TYPE:
 		psy->type = val->intval;
 		break;
+	case POWER_SUPPLY_PROP_LOW_POWER:
+		if (!!val->intval == atomic_read(&mdwc->in_lpm))
+			return 0;
+
+		if (mdwc->ext_chg_active)
+			return 0;
+
+		if (val->intval) {
+			pr_debug("force dwc3 to lpm\n");
+			pm_runtime_put_noidle(mdwc->dev);
+			pm_runtime_mark_last_busy(mdwc->dev);
+			pm_runtime_autosuspend(mdwc->dev);
+		} else {
+			pm_runtime_get_sync(mdwc->dev);
+		}
 	default:
 		return -EINVAL;
 	}
@@ -2475,6 +2637,7 @@ dwc3_msm_property_is_writeable(struct power_supply *psy,
 {
 	switch (psp) {
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+	case POWER_SUPPLY_PROP_LOW_POWER:
 		return 1;
 	default:
 		break;
@@ -2496,6 +2659,8 @@ static enum power_supply_property dwc3_msm_pm_power_props_usb[] = {
 	POWER_SUPPLY_PROP_TYPE,
 	POWER_SUPPLY_PROP_SCOPE,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
+	POWER_SUPPLY_PROP_POWER_NOW,
+	POWER_SUPPLY_PROP_LOW_POWER,
 };
 
 static void dwc3_init_adc_work(struct work_struct *w);
@@ -2541,13 +2706,26 @@ static void dwc3_ext_notify_online(void *ctx, int on)
 
 static void dwc3_id_work(struct work_struct *w)
 {
-	struct dwc3_msm *mdwc = container_of(w, struct dwc3_msm, id_work);
+	struct dwc3_msm *mdwc = container_of(w, struct dwc3_msm, id_work.work);
 	int ret;
+
+	if (mdwc->vbus_active) {
+		pr_err("Ignore spurious id interrupt, when vbus is active\n");
+		return;
+	}
+
+	if ((mdwc->host_mode != 1) &&
+		(get_prop_usbin_voltage_now(mdwc) > DWC3_VBUS_IN_THRESH)) {
+		pr_err("Ignore spurious id interrupt, when vbus > in_thresh\n");
+		return;
+	}
 
 	/* Give external client a chance to handle */
 	if (!mdwc->ext_inuse && usb_ext) {
-		if (mdwc->pmic_id_irq)
+		if (mdwc->pmic_id_irq && mdwc->id_irq_enabled) {
 			disable_irq(mdwc->pmic_id_irq);
+			mdwc->id_irq_enabled = false;
+		}
 
 		ret = usb_ext->notify(usb_ext->ctxt, mdwc->id_state,
 				      dwc3_ext_notify_online, mdwc);
@@ -2560,12 +2738,22 @@ static void dwc3_id_work(struct work_struct *w)
 			/* ID may have changed while IRQ disabled; update it */
 			mdwc->id_state = !!irq_read_line(mdwc->pmic_id_irq);
 			local_irq_restore(flags);
-			enable_irq(mdwc->pmic_id_irq);
+			if (!mdwc->id_irq_enabled) {
+				enable_irq(mdwc->pmic_id_irq);
+				mdwc->id_irq_enabled = true;
+			}
 		}
 
 		mdwc->ext_inuse = (ret == 0);
 	}
 
+	if (mdwc->pmic_id_irq &&
+		(mdwc->id_state == DWC3_ID_GROUND) &&
+		(get_prop_usbid_voltage_now(mdwc) > DWC3_ID_GND_THRESH)) {
+		mdwc->id_state = DWC3_ID_FLOAT;
+		pr_err("Spurious ID GND, Ignore\n");
+		return;
+	}
 	if (!mdwc->ext_inuse) { /* notify OTG */
 		mdwc->ext_xceiv.id = mdwc->id_state;
 		dwc3_resume_work(&mdwc->resume_work.work);
@@ -2581,7 +2769,12 @@ static irqreturn_t dwc3_pmic_id_irq(int irq, void *data)
 	id = !!irq_read_line(irq);
 	if (mdwc->id_state != id) {
 		mdwc->id_state = id;
-		queue_work(system_nrt_wq, &mdwc->id_work);
+		if (mdwc->vbus_active)
+			return IRQ_HANDLED;
+
+		queue_delayed_work(system_nrt_wq, &mdwc->id_work,
+				 msecs_to_jiffies(
+					DWC3_ID_STATUS_DELAY));
 	}
 
 	return IRQ_HANDLED;
@@ -2608,7 +2801,7 @@ static void dwc3_adc_notification(enum qpnp_tm_state state, void *ctx)
 		mdwc->adc_param.state_request = ADC_TM_HIGH_THR_ENABLE;
 	}
 
-	dwc3_id_work(&mdwc->id_work);
+	dwc3_id_work(&mdwc->id_work.work);
 
 	/* re-arm ADC interrupt */
 	qpnp_adc_tm_usbid_configure(mdwc->adc_tm_dev, &mdwc->adc_param);
@@ -2747,10 +2940,27 @@ dwc3_msm_ext_chg_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			break;
 		}
 
-		if (val == USB_REQUEST_5V)
-			pr_debug("%s:voting 5V voltage request\n", __func__);
-		else if (val == USB_REQUEST_9V)
-			pr_debug("%s:voting 9V voltage request\n", __func__);
+
+		if (mdwc->hvdcp_failures >= DWC3_HVDCP_MAX_FAILURES) {
+			pr_err("%s: too many voltage request failures\n",
+								__func__);
+			mdwc->hvdcp_chrg_mode = USB_REQUEST_MODE_NONE;
+			ret = -EFAULT;
+			break;
+		}
+
+		if (val == USB_REQUEST_5V) {
+			pr_info("%s:voting 5V voltage request\n", __func__);
+			mdwc->hvdcp_chrg_mode = USB_REQUEST_MODE_5V;
+			mdwc->hvdcp_chrg_stat = USB_REQUEST_STAT_PENDING;
+		} else if (val == USB_REQUEST_9V) {
+			pr_info("%s:voting 9V voltage request\n", __func__);
+			mdwc->hvdcp_chrg_mode = USB_REQUEST_MODE_9V;
+			mdwc->hvdcp_chrg_stat = USB_REQUEST_STAT_PENDING;
+		}
+
+		power_supply_changed(&mdwc->usb_psy);
+
 		break;
 	case MSM_USB_EXT_CHG_RESULT:
 		if (get_user(val, (int __user *)arg)) {
@@ -2759,10 +2969,29 @@ dwc3_msm_ext_chg_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			break;
 		}
 
-		if (!val)
-			pr_debug("%s:voltage request successful\n", __func__);
+		if (!val) {
+			pr_info("%s:voltage request successful\n", __func__);
+			mdwc->hvdcp_chrg_stat = USB_REQUEST_STAT_SUCCESS;
+		} else {
+			pr_info("%s:voltage request failed\n", __func__);
+			mdwc->hvdcp_chrg_stat = USB_REQUEST_STAT_FAIL;
+			mdwc->hvdcp_failures++;
+		}
+
+		power_supply_changed(&mdwc->usb_psy);
+
+		break;
+	case MSM_USB_EXT_CHG_TYPE:
+		if (get_user(val, (int __user *)arg)) {
+			pr_err("%s: get_user failed\n\n", __func__);
+			ret = -EFAULT;
+			break;
+		}
+
+		if (val)
+			pr_debug("%s:charger is external charger\n", __func__);
 		else
-			pr_debug("%s:voltage request failed\n", __func__);
+			pr_debug("%s:charger is not ext charger\n", __func__);
 		break;
 	case MSM_USB_EXT_CHG_TYPE:
 		if (get_user(val, (int __user *)arg)) {
@@ -2874,7 +3103,6 @@ static int __devinit dwc3_msm_probe(struct platform_device *pdev)
 	struct dwc3_msm *mdwc;
 	struct resource *res;
 	void __iomem *tcsr;
-	unsigned long flags;
 	int ret = 0;
 	int len = 0;
 	u32 tmp[3];
@@ -2892,7 +3120,7 @@ static int __devinit dwc3_msm_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&mdwc->chg_work, dwc3_chg_detect_work);
 	INIT_DELAYED_WORK(&mdwc->resume_work, dwc3_resume_work);
 	INIT_WORK(&mdwc->restart_usb_work, dwc3_restart_usb_work);
-	INIT_WORK(&mdwc->id_work, dwc3_id_work);
+	INIT_DELAYED_WORK(&mdwc->id_work, dwc3_id_work);
 	INIT_DELAYED_WORK(&mdwc->init_adc_work, dwc3_init_adc_work);
 	init_completion(&mdwc->ext_chg_wait);
 
@@ -3122,15 +3350,27 @@ static int __devinit dwc3_msm_probe(struct platform_device *pdev)
 					goto disable_hs_ldo;
 				}
 
-				local_irq_save(flags);
-				/* Update initial ID state */
-				mdwc->id_state =
-					!!irq_read_line(mdwc->pmic_id_irq);
-				if (mdwc->id_state == DWC3_ID_GROUND)
-					queue_work(system_nrt_wq,
-							&mdwc->id_work);
-				local_irq_restore(flags);
+				mdwc->pmic_id_gpio = of_get_named_gpio(node,
+							"pmic-id-gpio", 0);
+				if (of_property_read_u32(node,
+						"pmic-id-amux-chan",
+						&mdwc->pmic_id_amux_chan))
+					dev_dbg(&pdev->dev,
+						"unable to read ID amux\n");
+				if (of_property_read_u32(node,
+						"pmic-id-vin",
+						&mdwc->pmic_id_vin))
+					dev_dbg(&pdev->dev,
+						"unable to read ID vin\n");
+				if (of_property_read_u32(node,
+						"pmic-id-pull",
+						&mdwc->pmic_id_pull))
+					dev_dbg(&pdev->dev,
+						"unable to read ID pull\n");
+
+				mdwc->defer_read_id = true;
 				enable_irq_wake(mdwc->pmic_id_irq);
+				mdwc->id_irq_enabled = true;
 			}
 		}
 
@@ -3253,6 +3493,9 @@ static int __devinit dwc3_msm_probe(struct platform_device *pdev)
 			goto disable_hs_ldo;
 		}
 	}
+
+	mdwc->hvdcp_chrg_mode = USB_REQUEST_MODE_NONE;
+	mdwc->hvdcp_chrg_stat = USB_REQUEST_STAT_PENDING;
 
 	ret = of_platform_populate(node, NULL, NULL, &pdev->dev);
 	if (ret) {

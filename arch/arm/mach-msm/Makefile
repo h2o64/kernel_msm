@@ -1,3 +1,10 @@
+ifdef CONFIG_FUNCTION_TRACER
+CFLAGS_REMOVE_timer.o = -pg
+CFLAGS_REMOVE_clock.o = -pg
+CFLAGS_REMOVE_acpuclock.o = -pg
+CFLAGS_REMOVE_scm.o = -pg
+endif
+
 CFLAGS_scm.o :=$(call as-instr,.arch_extension sec,-DREQUIRES_SEC=1)
 
 obj-y += io.o dma.o memory.o
@@ -264,6 +271,8 @@ obj-$(CONFIG_MACH_MSM8930_FLUID) += board-8930-all.o board-8930-regulator-pm8038
 obj-$(CONFIG_PM8921_BMS) += bms-batterydata.o bms-batterydata-desay.o batterydata-lib.o
 obj-$(CONFIG_QPNP_BMS) += bms-batterydata.o bms-batterydata-desay.o batterydata-lib.o
 obj-$(CONFIG_QPNP_BMS) += bms-batterydata-oem.o bms-batterydata-qrd-4v35-2000mah.o bms-batterydata-qrd-4v2-1300mah.o
+obj-$(CONFIG_MMI_QPNP_BMS) += bms-batterydata.o bms-batterydata-desay.o batterydata-lib.o
+obj-$(CONFIG_MMI_QPNP_BMS) += bms-batterydata-oem.o bms-batterydata-qrd-4v35-2000mah.o bms-batterydata-qrd-4v2-1300mah.o
 obj-$(CONFIG_MACH_APQ8064_CDP) += board-8064-all.o board-8064-regulator.o
 obj-$(CONFIG_MACH_APQ8064_MTP) += board-8064-all.o board-8064-regulator.o
 obj-$(CONFIG_MACH_APQ8064_LIQUID) += board-8064-all.o board-8064-regulator.o
@@ -274,6 +283,7 @@ obj-$(CONFIG_ARCH_MSM9615) += clock-local.o clock-9615.o acpuclock-9615.o clock-
 obj-$(CONFIG_ARCH_APQ8084) += board-8084.o board-8084-gpiomux.o
 obj-$(CONFIG_ARCH_APQ8084) += clock-8084.o
 obj-$(CONFIG_ARCH_MSM8974) += board-8974.o board-8974-gpiomux.o
+obj-$(CONFIG_ARCH_MSM8974) += board-8974-moto-gpiomux.o
 obj-$(CONFIG_ARCH_MSM8974) += clock-krait-8974.o
 obj-$(CONFIG_ARCH_MSM8974) += clock-local2.o clock-pll.o clock-8974.o clock-rpm.o clock-voter.o clock-mdss-8974.o
 obj-$(CONFIG_ARCH_MSM8974) += gdsc.o
@@ -417,5 +427,12 @@ obj-$(CONFIG_MSM_DEVFREQ_CPUBW) += devfreq_cpubw.o
 
 obj-$(CONFIG_WALL_CLK) += wallclk.o
 obj-$(CONFIG_WALL_CLK_SYSFS) += wallclk_sysfs.o
+obj-$(CONFIG_HAS_MACH_MEMUTILS) += memutils/
 obj-$(CONFIG_ARCH_RANDOM) += early_random.o
 obj-$(CONFIG_PERFMAP) += perfmap.o
+obj-$(CONFIG_MMI_RAM_INFO) += mmi-ram-info.o
+obj-$(CONFIG_MMI_UNIT_INFO) += mmi-unit-info.o
+obj-$(CONFIG_MMI_SOC_INFO) += mmi_soc_info.o
+obj-$(CONFIG_MMI_MSM_PINMUX) += mmi-pinmux.o
+obj-$(CONFIG_PM_DEBUG) += pm_debug.o
+obj-$(CONFIG_MMI_MSM_CLOCK) += mmi-clock.o

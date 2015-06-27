@@ -26,6 +26,12 @@ Profile data node required properties:
 			used as an array which could support multiple IDs for one battery
 			module when the ID resistance of some battery modules goes across
 			several ranges.
+- qcom,max-current-ma : The maximum current of the battery
+- qcom,batt-id-sn : The Serial number of the Battery Pack
+
+qcom,battery-data node optional properties:
+qcom,batt-id-limits :  If defined this will be used as a hard range limit on
+		       detecting this battery resistor.  The units are in uV.
 
 Profile data node required subnodes:
 - qcom,fcc-temp-lut : An 1-dimensional lookup table node that encodes
@@ -83,6 +89,7 @@ qcom,palladium-batterydata {
 	qcom,v-cutoff-uv = <3400000>;
 	qcom,chg-term-ua = <100000>;
 	qcom,batt-id-kohm = <75>;
+	qcom,max-current-ma = <2600>;
 
 	qcom,fcc-temp-lut {
 		qcom,lut-col-legend = <(-20) 0 25 40 65>;

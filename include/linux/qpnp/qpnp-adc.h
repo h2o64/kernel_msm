@@ -806,11 +806,13 @@ struct qpnp_vadc_scaling_ratio {
  * @adc_reference: Reference voltage for QPNP ADC.
  * @bitresolution: ADC bit resolution for QPNP ADC.
  * @biploar: Polarity for QPNP ADC.
+ * @batt_therm_type: Which Battery Thermistor map to use.
  */
 struct qpnp_adc_properties {
 	uint32_t	adc_vdd_reference;
 	uint32_t	bitresolution;
 	bool		bipolar;
+	uint32_t	batt_therm_type;
 };
 
 /**
@@ -1041,6 +1043,21 @@ int32_t qpnp_vadc_read(struct qpnp_vadc_chip *dev,
 				struct qpnp_vadc_result *result);
 
 /**
+ * Same as qpnp_vadc_read() while can be called in suspend op
+ */
+int32_t qpnp_vadc_read_pmsafe(struct qpnp_vadc_chip *vadc,
+				enum qpnp_vadc_channels channel,
+				struct qpnp_vadc_result *result);
+
+/**
+ * Same as qpnp_vadc_read() while can be called in suspend op if pmsafe is 1
+ */
+int32_t qpnp_vadc_read_base(struct qpnp_vadc_chip *vadc,
+				enum qpnp_vadc_channels channel,
+				struct qpnp_vadc_result *result,
+				int pmsafe);
+
+/**
  * qpnp_vadc_conv_seq_request() - Performs ADC read on the conversion
  *				sequencer channel.
  * @dev:	Structure device for qpnp vadc
@@ -1058,6 +1075,11 @@ int32_t qpnp_vadc_conv_seq_request(struct qpnp_vadc_chip *dev,
  * @data:	Data used for verifying the range of the ADC code.
  */
 int32_t qpnp_vadc_check_result(int32_t *data);
+
+/**
+ * qpnp_vadc_get_batt_therm_type() - Returns batt therm type.
+ */
+int32_t qpnp_vadc_get_batt_therm_type(struct qpnp_vadc_chip *qpnp_vadc);
 
 /**
  * qpnp_adc_get_devicetree_data() - Abstracts the ADC devicetree data.
@@ -1326,6 +1348,10 @@ int32_t qpnp_adc_tm_scale_therm_voltage_pu2(struct qpnp_vadc_chip *dev,
 int32_t qpnp_adc_tm_scale_voltage_therm_pu2(struct qpnp_vadc_chip *dev,
 				uint32_t reg, int64_t *result);
 /**
+ * qpnp_adc_tm_get_batt_therm_type() - Returns batt therm type.
+ */
+int32_t qpnp_adc_tm_get_batt_therm_type(void);
+/**
  * qpnp_adc_usb_scaler() - Performs reverse calibration on the low/high
  *		voltage threshold values passed by the client.
  *		The function applies ratiometric calibration on the
@@ -1393,6 +1419,10 @@ int32_t qpnp_vbat_sns_comp_result(struct qpnp_vadc_chip *dev,
 int qpnp_adc_get_revid_version(struct device *dev);
 #else
 static inline int32_t qpnp_vadc_read(struct qpnp_vadc_chip *dev,
+				uint32_t channel,
+				struct qpnp_vadc_result *result)
+{ return -ENXIO; }
+static inline int32_t qpnp_vadc_read_pmsafe(struct qpnp_vadc_chip *dev,
 				uint32_t channel,
 				struct qpnp_vadc_result *result)
 { return -ENXIO; }
@@ -1542,6 +1572,12 @@ int32_t qpnp_iadc_get_rsense(struct qpnp_iadc_chip *dev, int32_t *rsense);
 int32_t qpnp_iadc_get_gain_and_offset(struct qpnp_iadc_chip *dev,
 					struct qpnp_iadc_calib *result);
 /**
+ * Same as qpnp_iadc_get_gain_and_offset() while can be called in suspend op
+ */
+int32_t qpnp_iadc_get_gain_and_offset_pmsafe(struct qpnp_iadc_chip *dev,
+					struct qpnp_iadc_calib *result);
+
+/**
  * qpnp_get_iadc() - Clients need to register with the iadc with the
  *		corresponding device instance it wants to read the channels.
  *		Read the bindings document on how to pass the phandle for
@@ -1614,6 +1650,9 @@ static inline int32_t qpnp_iadc_get_rsense(struct qpnp_iadc_chip *iadc,
 { return -ENXIO; }
 static inline int32_t qpnp_iadc_get_gain_and_offset(struct qpnp_iadc_chip *iadc,
 				struct qpnp_iadc_calib *result)
+{ return -ENXIO; }
+static inline int32_t qpnp_iadc_get_gain_and_offset_pmsafe(
+	struct qpnp_iadc_chip *iadc, struct qpnp_iadc_calib *result)
 { return -ENXIO; }
 static inline struct qpnp_iadc_chip *qpnp_get_iadc(struct device *dev,
 							const char *name)

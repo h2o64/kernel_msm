@@ -2,7 +2,7 @@
  *
  * Copyright (C) 2008 Google, Inc.
  * Author: Brian Swetland <swetland@google.com>
- * Copyright (c) 2009-2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2009-2015, The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -103,6 +103,9 @@ enum msm_usb_phy_type {
 };
 
 #define IDEV_CHG_MAX	1500
+#define IDEV_CHG_DCP    1300
+#define IDEV_CHG_PROP   1200
+#define IDEV_CHG_TA	1100
 #define IDEV_CHG_MIN	500
 #define IUNIT		100
 
@@ -248,6 +251,10 @@ enum usb_ext_chg_status {
  *		mode with controller in device mode.
  * @disable_retention_with_vdd_min: Indicates whether to enable allowing
  *		VDD min without putting PHY into retention
+ * @id_flt_gpio: GPIO from external detection IC for ID Float
+ * @id_gnd_gpio: GPIO from external detection IC for ID Gnd
+ * @id_flt_active_high: Active logic for id_flt_gpio
+ * @id_gnd_active_high: Active logic for id_gnd_gpio
  */
 struct msm_otg_platform_data {
 	int *phy_init_seq;
@@ -278,6 +285,10 @@ struct msm_otg_platform_data {
 	bool dpdm_pulldown_added;
 	bool enable_ahb2ahb_bypass;
 	bool disable_retention_with_vdd_min;
+	int id_flt_gpio;
+	int id_gnd_gpio;
+	bool id_flt_active_high;
+	bool id_gnd_active_high;
 };
 
 /* phy related flags */
@@ -345,6 +356,7 @@ struct msm_otg_platform_data {
  * @in_lpm: indicates low power mode (LPM) state.
  * @async_int: IRQ line on which ASYNC interrupt arrived in LPM.
  * @cur_power: The amount of mA available from downstream port.
+ * @otg_wq: Strict order otg workqueue for OTG works (SM/ID/SUSPEND).
  * @chg_work: Charger detection work.
  * @chg_state: The state of charger detection process.
  * @chg_type: The type of charger attached.
@@ -407,8 +419,10 @@ struct msm_otg {
 	atomic_t pm_suspended;
 	struct notifier_block pm_notify;
 	atomic_t in_lpm;
+	bool err_event_seen;
 	int async_int;
 	unsigned cur_power;
+	struct workqueue_struct *otg_wq;
 	struct delayed_work chg_work;
 	struct delayed_work pmic_id_status_work;
 	struct delayed_work suspend_work;
@@ -487,6 +501,9 @@ struct msm_otg {
 	int ui_enabled;
 	bool pm_done;
 	struct qpnp_vadc_chip	*vadc_dev;
+	atomic_t pmic_id_masked;
+	u8 charger_retry_count;
+	wait_queue_head_t       host_suspend_wait;
 };
 
 struct ci13xxx_platform_data {

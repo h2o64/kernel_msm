@@ -7,6 +7,7 @@ config ARM
 	select HAVE_DMA_CONTIGUOUS if (CPU_V6 || CPU_V6K || CPU_V7)
 	select HAVE_DMA_ATTRS
 	select HAVE_MEMBLOCK
+	select HAVE_MEMBLOCK_NODE_MAP
 	select RTC_LIB
 	select SYS_SUPPORTS_APM_EMULATION
 	select GENERIC_ATOMIC64 if (CPU_V6 || !CPU_32v6K || !AEABI)
@@ -16,8 +17,8 @@ config ARM
 	select HAVE_KPROBES if !XIP_KERNEL
 	select HAVE_KRETPROBES if (HAVE_KPROBES)
 	select HAVE_FUNCTION_TRACER if (!XIP_KERNEL)
-	select HAVE_FTRACE_MCOUNT_RECORD if (!XIP_KERNEL)
-	select HAVE_DYNAMIC_FTRACE if (!XIP_KERNEL)
+	select HAVE_FTRACE_MCOUNT_RECORD if (!XIP_KERNEL && !ARCH_MSM)
+	select HAVE_DYNAMIC_FTRACE if (!XIP_KERNEL && !ARCH_MSM)
 	select HAVE_FUNCTION_GRAPH_TRACER if (!THUMB2_KERNEL)
 	select ARCH_BINFMT_ELF_RANDOMIZE_PIE
 	select HAVE_GENERIC_DMA_COHERENT
@@ -29,7 +30,7 @@ config ARM
 	select HAVE_PERF_EVENTS
 	select PERF_USE_VMALLOC
 	select HAVE_REGS_AND_STACK_ACCESS_API
-	select HAVE_HW_BREAKPOINT if (PERF_EVENTS && (CPU_V6 || CPU_V6K || CPU_V7))
+	select HAVE_HW_BREAKPOINT if (PERF_EVENTS && (CPU_V6 || CPU_V6K || CPU_V7) && PM_DEBUG)
 	select HAVE_C_RECORDMCOUNT
 	select HAVE_GENERIC_HARDIRQS
 	select GENERIC_IRQ_SHOW
@@ -290,6 +291,14 @@ config ARM_USER_ACCESSIBLE_TIMER_BASE
 	 Specify the base user-space virtual address where the user-accessible
 	 timer counter page should be mapped by the kernel.  User-space apps
 	 will read directly from the page at this address.
+
+config BOOTINFO
+	bool "Boot Information Feature"
+	default n
+	help
+	  This feature provides access to certain boot information
+	  from both kernel context (via function call) and user
+	  context (via /proc/bootinfo).
 
 config ARCH_RANDOM
 	bool "SOC specific random number generation"
@@ -2435,6 +2444,13 @@ config NEON
 	help
 	  Say Y to include support code for NEON, the ARMv7 Advanced SIMD
 	  Extension.
+
+config KERNEL_MODE_NEON
+	bool "Support for NEON in kernel mode"
+	default n
+	depends on NEON
+	help
+	  Say Y to include support for NEON in kernel mode.
 
 endmenu
 

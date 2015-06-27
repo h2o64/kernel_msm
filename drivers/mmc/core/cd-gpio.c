@@ -23,7 +23,7 @@ struct mmc_cd_gpio {
 	char label[0];
 };
 
-static int mmc_cd_get_status(struct mmc_host *host)
+static int mmc_cd_read_status(struct mmc_host *host)
 {
 	int ret = -ENOSYS;
 	struct mmc_cd_gpio *cd = host->hotplug.handler_priv;
@@ -37,13 +37,23 @@ out:
 	return ret;
 }
 
+int mmc_cd_get_status(struct mmc_host *host)
+{
+	struct mmc_cd_gpio *cd = host->hotplug.handler_priv;
+
+	if (!cd || !gpio_is_valid(cd->gpio))
+		return -ENOSYS;
+
+	return cd->status;
+}
+
 static irqreturn_t mmc_cd_gpio_irqt(int irq, void *dev_id)
 {
 	struct mmc_host *host = dev_id;
 	struct mmc_cd_gpio *cd = host->hotplug.handler_priv;
 	int status;
 
-	status = mmc_cd_get_status(host);
+	status = mmc_cd_read_status(host);
 	if (unlikely(status < 0))
 		goto out;
 
@@ -53,6 +63,9 @@ static irqreturn_t mmc_cd_gpio_irqt(int irq, void *dev_id)
 				(host->caps2 & MMC_CAP2_CD_ACTIVE_HIGH) ?
 				"HIGH" : "LOW");
 		cd->status = status;
+		host->card_bad = 0;
+		host->requests = 0ULL;
+		host->request_errors = 0ULL;
 
 		/* Schedule a card detection after a debounce timeout */
 		mmc_detect_change(host, msecs_to_jiffies(100));
@@ -84,8 +97,9 @@ int mmc_cd_gpio_request(struct mmc_host *host, unsigned int gpio)
 	cd->gpio = gpio;
 	host->hotplug.irq = irq;
 	host->hotplug.handler_priv = cd;
+	host->hotplug.get_cd = mmc_cd_get_status;
 
-	ret = mmc_cd_get_status(host);
+	ret = mmc_cd_read_status(host);
 	if (ret < 0)
 		goto eirqreq;
 

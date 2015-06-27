@@ -28,6 +28,7 @@
 #include <linux/fs.h>
 #include <linux/proc_fs.h>
 #include <linux/memblock.h>
+#include <linux/mot_patch.h>
 #include <linux/bug.h>
 #include <linux/compiler.h>
 #include <linux/sort.h>
@@ -82,6 +83,8 @@ extern void paging_init(struct machine_desc *desc);
 extern void sanity_check_meminfo(void);
 extern void reboot_setup(char *str);
 extern void setup_dma_zone(struct machine_desc *desc);
+void __attribute__((weak)) mach_cpuinfo_show(struct seq_file *m, void *v);
+
 
 unsigned int processor_id;
 EXPORT_SYMBOL(processor_id);
@@ -942,6 +945,7 @@ void __init setup_arch(char **cmdline_p)
 	struct machine_desc *mdesc;
 
 	setup_processor();
+	mot_patch_kernel(__atags_pointer);
 	mdesc = setup_machine_fdt(__atags_pointer);
 	if (!mdesc)
 		mdesc = setup_machine_tags(machine_arch_type);
@@ -1121,6 +1125,9 @@ static int c_show(struct seq_file *m, void *v)
 	seq_printf(m, "Revision\t: %04x\n", system_rev);
 	seq_printf(m, "Serial\t\t: %08x%08x\n",
 		   system_serial_high, system_serial_low);
+
+	if (mach_cpuinfo_show)
+		mach_cpuinfo_show(m, v);
 
 	return 0;
 }

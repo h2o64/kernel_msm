@@ -456,16 +456,19 @@
 
 	qcom,msm-mem-hole {
 		compatible = "qcom,msm-mem-hole";
-		qcom,memblock-remove = <0x08800000 0x5600000>; /* Address and Size of Hole */
+		qcom,memblock-remove = <0x08800000 0x3A00000
+                                0x0C500000 0x1900000>; /* Address and Size of Hole */
 	};
 
 	qcom,wdt@f9017000 {
 		compatible = "qcom,msm-watchdog";
 		reg = <0xf9017000 0x1000>;
 		interrupts = <0 3 0>, <0 4 0>;
-		qcom,bark-time = <11000>;
+		qcom,bark-time = <22000>;
 		qcom,pet-time = <10000>;
 		qcom,ipi-ping;
+		qcom,memory-reservation-type = "EBI1";
+		qcom,memory-reservation-size = <0x6000>;
 	};
 
 	qcom,clock-a7@f9011050 {
@@ -592,8 +595,8 @@
 		qcom,master-id = <86>;
 	};
 
-	i2c@f9925000 { /* BLSP-1 QUP-3 */
-		cell-index = <0>;
+	i2c_3: i2c@f9925000 { /* BLSP-1 QUP-3 */
+		cell-index = <3>;
 		compatible = "qcom,i2c-qup";
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -905,8 +908,7 @@
 		qcom,core-control-mask = <0xe>;
 		qcom,hotplug-temp = <110>;
 		qcom,hotplug-temp-hysteresis = <20>;
-		qcom,cpu-sensors = "tsens_tz_sensor5", "tsens_tz_sensor5",
-				"tsens_tz_sensor5", "tsens_tz_sensor5";
+		qcom,cpu-sensors = "tsens_tz_sensor5", "tsens_tz_sensor5";
 		qcom,default-temp = <80>;
 		qcom,efuse-data = <0xfc4b8000 0x1000 23 30 0x3>;
 		qcom,efuse-temperature-map = <0x1 70>;
@@ -1013,6 +1015,8 @@
 	qcom,tz-log@fe805720 {
 		compatible = "qcom,tz-log";
 		reg = <0x0fe805720 0x1000>;
+		qcom,memory-reservation-type = "EBI1";
+		qcom,memory-reservation-size = <0x1000>;
 	};
 
 	qcom,qcrypto@fd404000 {

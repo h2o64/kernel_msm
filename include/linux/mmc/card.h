@@ -57,11 +57,26 @@ struct mmc_ext_csd {
 	u8			max_packed_writes;
 	u8			max_packed_reads;
 	u8			packed_event_en;
+	u8			pre_eol_info;
+#define MMC_PRE_EOL_NORMAL	0x01
+#define MMC_PRE_EOL_WARNING	0x02
+#define MMC_PRE_EOL_URGENT	0x03
+	u8			dev_life_time_est_a;
+	u8			dev_life_time_est_b;
+	unsigned int		vendor_health_report[8];
+	u64			firmware_version;
+	unsigned int		device_version;
 	unsigned int		part_time;		/* Units: ms */
 	unsigned int		sa_timeout;		/* Units: 100ns */
 	unsigned int		generic_cmd6_time;	/* Units: 10ms */
 	unsigned int            power_off_longtime;     /* Units: ms */
 	u8			power_off_notification;	/* state */
+	u8			drv_type;		/* eMMC Driver type */
+#define MMC_DRIVER_TYPE_0	0x01
+#define MMC_DRIVER_TYPE_1	0x02
+#define MMC_DRIVER_TYPE_2	0x04
+#define MMC_DRIVER_TYPE_3	0x08
+#define MMC_DRIVER_TYPE_4	0x10
 	unsigned int		hs_max_dtr;
 #define MMC_HIGH_26_MAX_DTR	26000000
 #define MMC_HIGH_52_MAX_DTR	52000000
@@ -95,6 +110,7 @@ struct mmc_ext_csd {
 	u8			raw_ext_csd_structure;	/* 194 */
 	u8			raw_card_type;		/* 196 */
 	u8			raw_drive_strength;	/* 197 */
+	u8			raw_driver_strength;	/* 197 */
 	u8			out_of_int_time;	/* 198 */
 	u8			raw_s_a_timeout;		/* 217 */
 	u8			raw_hc_erase_gap_size;	/* 221 */
@@ -105,6 +121,10 @@ struct mmc_ext_csd {
 	u8			raw_sec_feature_support;/* 231 */
 	u8			raw_trim_mult;		/* 232 */
 	u8			raw_bkops_status;	/* 246 */
+	u8			raw_device_version[2];	/* 262 - 2 bytes */
+	u8			raw_optimal_trim_size;	/* 264 */
+	u8			raw_optimal_write_size;	/* 265 */
+	u8			raw_optimal_read_size;	/* 266 */
 	u8			raw_sectors[4];		/* 212 - 4 bytes */
 
 	unsigned int            feature_support;
@@ -126,6 +146,8 @@ struct sd_ssr {
 	unsigned int		au;			/* In sectors */
 	unsigned int		erase_timeout;		/* In milliseconds */
 	unsigned int		erase_offset;		/* In milliseconds */
+	unsigned char		speed_class;
+	unsigned char		uhs_speed_grade;
 };
 
 struct sd_switch_caps {
@@ -221,6 +243,7 @@ enum mmc_blk_status {
 	MMC_BLK_URGENT,
 	MMC_BLK_URGENT_DONE,
 	MMC_BLK_NO_REQ_TO_STOP,
+	MMC_BLK_BUS_ERR,
 };
 
 struct mmc_wr_pack_stats {
@@ -361,6 +384,8 @@ struct mmc_card {
 #define MMC_QUIRK_BROKEN_DATA_TIMEOUT	(1<<12)
 
 #define MMC_QUIRK_CACHE_DISABLE (1 << 14)       /* prevent cache enable */
+#define MMC_QUIRK_SLOW_HPI_RESPONSE (1 << 30)   /* wait between STOP and HPI */
+#define MMC_QUIRK_RETRY_FLUSH_TIMEOUT (1 << 31) /* requeue flush command timeouts */
 
 	unsigned int		erase_size;	/* erase size in sectors */
  	unsigned int		erase_shift;	/* if erase unit is power 2 */
@@ -402,6 +427,15 @@ struct mmc_card {
 	struct notifier_block        reboot_notify;
 	enum mmc_pon_type pon_type;
 	u8 *cached_ext_csd;
+
+#define MMC_ERROR_FAILURE_RATIO	10		/* give up on cards with too many failures/successes */
+#define MMC_ERROR_FORGIVE_RATIO	10		/* forgive cards with enough successes/failures */
+	unsigned int		failures;	/* number of recent request failures */
+	unsigned int		successes;	/* successful requests since 1st recorded failure  */
+#define MMC_ERROR_MAX_TIME_MS	10000LL		/* give up after 10 seconds of trouble */
+	ktime_t			failure_time;	/* time of the first failure */
+#define MMC_THROTTLE_BACK_THRESHOLD 2
+	unsigned int		crc_errors;	/* number of CRC errors seen at this speed */
 };
 
 /*
@@ -443,6 +477,7 @@ struct mmc_fixup {
 	u16 cis_vendor, cis_device;
 	/* for MMC cards */
 	unsigned int ext_csd_rev;
+	unsigned long long ext_csd_fw_ver;
 
 	void (*vendor_fixup)(struct mmc_card *card, int data);
 	int data;
@@ -453,19 +488,22 @@ struct mmc_fixup {
 #define CID_NAME_ANY (NULL)
 
 #define EXT_CSD_REV_ANY (-1u)
+#define EXT_CSD_FW_VER_ANY (-1ull)
 
 #define CID_MANFID_SANDISK	0x2
 #define CID_MANFID_TOSHIBA	0x11
 #define CID_MANFID_MICRON	0x13
 #define CID_MANFID_SAMSUNG	0x15
 #define CID_MANFID_KINGSTON	0x70
+#define CID_MANFID_SANDISK2	0x45
 #define CID_MANFID_HYNIX	0x90
+#define CID_MANFID_MICRON2	0xfe
 
 #define END_FIXUP { 0 }
 
 #define _FIXUP_EXT(_name, _manfid, _oemid, _rev_start, _rev_end,	\
 		   _cis_vendor, _cis_device,				\
-		   _fixup, _data, _ext_csd_rev)				\
+		   _fixup, _data, _ext_csd_rev, _ext_csd_fw_ver)	\
 	{						   \
 		.name = (_name),			   \
 		.manfid = (_manfid),			   \
@@ -477,6 +515,7 @@ struct mmc_fixup {
 		.vendor_fixup = (_fixup),		   \
 		.data = (_data),			   \
 		.ext_csd_rev = (_ext_csd_rev),		   \
+		.ext_csd_fw_ver = (_ext_csd_fw_ver),	   \
 	 }
 
 #define MMC_FIXUP_REV(_name, _manfid, _oemid, _rev_start, _rev_end,	\
@@ -484,7 +523,7 @@ struct mmc_fixup {
 	_FIXUP_EXT(_name, _manfid,					\
 		   _oemid, _rev_start, _rev_end,			\
 		   SDIO_ANY_ID, SDIO_ANY_ID,				\
-		   _fixup, _data, _ext_csd_rev)				\
+		   _fixup, _data, _ext_csd_rev, EXT_CSD_FW_VER_ANY)	\
 
 #define MMC_FIXUP(_name, _manfid, _oemid, _fixup, _data)		\
 	MMC_FIXUP_REV(_name, _manfid, _oemid, 0, -1ull, _fixup, _data,	\
@@ -495,11 +534,17 @@ struct mmc_fixup {
 	MMC_FIXUP_REV(_name, _manfid, _oemid, 0, -1ull, _fixup, _data,	\
 		      _ext_csd_rev)
 
+#define MMC_FIXUP_FW_VER(_name, _manfid, _oemid, _fixup, _data,		\
+			 _ext_csd_rev, _ext_csd_fw_ver)			\
+	_FIXUP_EXT(_name, _manfid, _oemid, 0, -1ull,			\
+		   SDIO_ANY_ID, SDIO_ANY_ID, _fixup, _data,		\
+		   _ext_csd_rev, _ext_csd_fw_ver)
+
 #define SDIO_FIXUP(_vendor, _device, _fixup, _data)			\
 	_FIXUP_EXT(CID_NAME_ANY, CID_MANFID_ANY,			\
 		    CID_OEMID_ANY, 0, -1ull,				\
 		   _vendor, _device,					\
-		   _fixup, _data, EXT_CSD_REV_ANY)			\
+		   _fixup, _data, EXT_CSD_REV_ANY, EXT_CSD_FW_VER_ANY)	\
 
 #define cid_rev(hwrev, fwrev, year, month)	\
 	(((u64) hwrev) << 40 |                  \
@@ -564,6 +609,7 @@ static inline void __maybe_unused remove_quirk(struct mmc_card *card, int data)
 #define mmc_card_clr_doing_bkops(c)	((c)->state &= ~MMC_STATE_DOING_BKOPS)
 #define mmc_card_set_need_bkops(c)	((c)->state |= MMC_STATE_NEED_BKOPS)
 #define mmc_card_clr_need_bkops(c)	((c)->state &= ~MMC_STATE_NEED_BKOPS)
+
 /*
  * Quirk add/remove for MMC products.
  */

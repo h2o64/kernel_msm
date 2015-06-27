@@ -774,7 +774,7 @@ extern int movable_zone;
 
 static inline int zone_movable_is_highmem(void)
 {
-#if defined(CONFIG_HIGHMEM) && defined(CONFIG_HAVE_MEMBLOCK_NODE)
+#if defined(CONFIG_HIGHMEM) && defined(CONFIG_HAVE_MEMBLOCK_NODE_MAP)
 	return movable_zone == ZONE_HIGHMEM;
 #else
 	return 0;
@@ -840,6 +840,8 @@ static inline int is_dma(struct zone *zone)
 /* These two functions are used to setup the per zone pages min values */
 struct ctl_table;
 int min_free_kbytes_sysctl_handler(struct ctl_table *, int,
+					void __user *, size_t *, loff_t *);
+int min_free_normal_offset_sysctl_handler(struct ctl_table *, int,
 					void __user *, size_t *, loff_t *);
 extern int sysctl_lowmem_reserve_ratio[MAX_NR_ZONES-1];
 int lowmem_reserve_ratio_sysctl_handler(struct ctl_table *, int,

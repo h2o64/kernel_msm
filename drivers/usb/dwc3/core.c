@@ -52,16 +52,13 @@
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
+#include <linux/usb/of.h>
 
 #include "core.h"
 #include "gadget.h"
 #include "io.h"
 
 #include "debug.h"
-
-static char *maximum_speed = "super";
-module_param(maximum_speed, charp, 0);
-MODULE_PARM_DESC(maximum_speed, "Maximum supported speed.");
 
 /* -------------------------------------------------------------------------- */
 
@@ -217,7 +214,7 @@ static void dwc3_free_one_event_buffer(struct dwc3 *dwc,
  * Returns a pointer to the allocated event buffer structure on success
  * otherwise ERR_PTR(errno).
  */
-static struct dwc3_event_buffer *__devinit
+static struct dwc3_event_buffer *
 dwc3_alloc_one_event_buffer(struct dwc3 *dwc, unsigned length)
 {
 	struct dwc3_event_buffer	*evt;
@@ -264,7 +261,7 @@ static void dwc3_free_event_buffers(struct dwc3 *dwc)
  * Returns 0 on success otherwise negative errno. In the error case, dwc
  * may contain some buffers allocated but not all which were requested.
  */
-static int __devinit dwc3_alloc_event_buffers(struct dwc3 *dwc, unsigned length)
+static int dwc3_alloc_event_buffers(struct dwc3 *dwc, unsigned length)
 {
 	int			num;
 	int			i;
@@ -613,19 +610,14 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 	dwc->regs_size	= resource_size(res);
 	dwc->dev	= dev;
 
-	if (!strncmp("super", maximum_speed, 5))
-		dwc->maximum_speed = DWC3_DCFG_SUPERSPEED;
-	else if (!strncmp("high", maximum_speed, 4))
-		dwc->maximum_speed = DWC3_DCFG_HIGHSPEED;
-	else if (!strncmp("full", maximum_speed, 4))
-		dwc->maximum_speed = DWC3_DCFG_FULLSPEED1;
-	else if (!strncmp("low", maximum_speed, 3))
-		dwc->maximum_speed = DWC3_DCFG_LOWSPEED;
-	else
-		dwc->maximum_speed = DWC3_DCFG_SUPERSPEED;
-
 	dwc->needs_fifo_resize = of_property_read_bool(node, "tx-fifo-resize");
 	host_only_mode = of_property_read_bool(node, "host-only-mode");
+	dwc->maximum_speed = of_usb_get_maximum_speed(node);
+
+	/* default to superspeed if no maximum_speed passed */
+	if (dwc->maximum_speed == USB_SPEED_UNKNOWN)
+		dwc->maximum_speed = USB_SPEED_SUPER;
+
 
 	pm_runtime_no_callbacks(dev);
 	pm_runtime_set_active(dev);

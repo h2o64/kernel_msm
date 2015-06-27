@@ -63,6 +63,11 @@ void mdss_check_dsi_ctrl_status(struct work_struct *work, uint32_t interval)
 	ctl = mfd_to_ctl(pstatus_data->mfd);
 
 	if (!ctl) {
+		pr_warn("%s: mdss_mdp_ctl data not available\n", __func__);
+		return;
+	}
+
+	if (!ctl) {
 		pr_err("%s: Display is off\n", __func__);
 		return;
 	}
