@@ -32,11 +32,13 @@
 #include <mach/msm_smsm.h>
 #include <mach/ramdump.h>
 #include <mach/msm_smem.h>
+#include <asm/bootinfo.h>
 
 #include "peripheral-loader.h"
 #include "pil-q6v5.h"
 #include "pil-msa.h"
 #include "sysmon.h"
+#include "mmi-unit-info.h"
 
 #define MAX_VDD_MSS_UV		1150000
 #define PROXY_TIMEOUT_MS	10000
@@ -57,10 +59,16 @@ struct modem_data {
 
 #define subsys_to_drv(d) container_of(d, struct modem_data, subsys_desc)
 
+static char pil_ssr_reason[MAX_SSR_REASON_LEN];
+static char *ssr_reason = pil_ssr_reason;
+module_param(ssr_reason, charp, S_IRUGO);
+
 static void log_modem_sfr(void)
 {
 	u32 size;
-	char *smem_reason, reason[MAX_SSR_REASON_LEN];
+	char *smem_reason;
+
+	mmi_set_pureason(PU_REASON_MODEM_RESET);
 
 	smem_reason = smem_get_entry_no_rlock(SMEM_SSR_REASON_MSS0, &size);
 	if (!smem_reason || !size) {
@@ -72,8 +80,8 @@ static void log_modem_sfr(void)
 		return;
 	}
 
-	strlcpy(reason, smem_reason, min(size, sizeof(reason)));
-	pr_err("modem subsystem failure reason: %s.\n", reason);
+	strlcpy(pil_ssr_reason, smem_reason, min(size, sizeof(pil_ssr_reason)));
+	pr_err("modem subsystem failure reason: %s.\n", pil_ssr_reason);
 
 	smem_reason[0] = '\0';
 	wmb();
@@ -217,6 +225,10 @@ static int mss_start(const struct subsys_desc *desc)
 		return 0;
 
 	INIT_COMPLETION(drv->stop_ack);
+
+	/* ignore error, IC may be not placed */
+	cycapsense_fw_update();
+
 	ret = pil_boot(&drv->q6->desc);
 	if (ret)
 		return ret;

@@ -533,11 +533,6 @@ static int soc_pcm_prepare(struct snd_pcm_substream *substream)
 
 	mutex_lock_nested(&rtd->pcm_mutex, rtd->pcm_subclass);
 
-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
-		snd_soc_dapm_stream_event(rtd,
-		codec_dai->driver->playback.stream_name,
-		SND_SOC_DAPM_STREAM_START);
-
 	if (rtd->dai_link->ops && rtd->dai_link->ops->prepare) {
 		ret = rtd->dai_link->ops->prepare(substream);
 		if (ret < 0) {
@@ -577,22 +572,19 @@ static int soc_pcm_prepare(struct snd_pcm_substream *substream)
 		cancel_delayed_work(&rtd->delayed_work);
 	}
 
-	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
+	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+		snd_soc_dapm_stream_event(rtd,
+					  codec_dai->driver->playback.stream_name,
+					  SND_SOC_DAPM_STREAM_START);
+	else {
 		if (codec_dai->capture_active == 1)
 			snd_soc_dapm_stream_event(rtd,
-			codec_dai->driver->capture.stream_name,
-			SND_SOC_DAPM_STREAM_START);
+					  codec_dai->driver->capture.stream_name,
+					  SND_SOC_DAPM_STREAM_START);
 	}
 	snd_soc_dai_digital_mute(codec_dai, 0);
 
 out:
-	if (ret < 0 && substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
-		pr_err("%s: Issue stop stream for codec_dai due to op failure %d = ret\n",
-		__func__, ret);
-		snd_soc_dapm_stream_event(rtd,
-		codec_dai->driver->playback.stream_name,
-		SND_SOC_DAPM_STREAM_STOP);
-	}
 	mutex_unlock(&rtd->pcm_mutex);
 	return ret;
 }
@@ -2438,10 +2430,15 @@ int soc_dpcm_fe_dai_open(struct snd_pcm_substream *fe_substream)
 	mutex_lock(&fe->card->dpcm_mutex);
 	fe->dpcm[stream].runtime = fe_substream->runtime;
 
-	if (dpcm_path_get(fe, stream, &list) <= 0) {
+	ret = dpcm_path_get(fe, stream, &list);
+	if (ret <= 0) {
 		dev_warn(fe->dev, "asoc: %s no valid %s route from source to sink\n",
 			fe->dai_link->name, stream ? "capture" : "playback");
 		mutex_unlock(&fe->card->dpcm_mutex);
+
+		/* If failure is because of no paths, free the memory */
+		if (ret == 0)
+			dpcm_path_put(&list);
 		return -EINVAL;
 	}
 

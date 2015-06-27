@@ -17,6 +17,7 @@
 #include <linux/string.h>
 #include <linux/clk.h>
 #include <linux/dma-mapping.h>
+#include <linux/sec_export.h>
 
 #include <asm/cacheflush.h>
 
@@ -150,7 +151,8 @@ int pas_init_image(enum pas_id id, const u8 *metadata, size_t size)
 	mdata_buf = dma_alloc_attrs(NULL, size, &mdata_phys, GFP_KERNEL,
 					&attrs);
 	if (!mdata_buf) {
-		pr_err("Allocation for metadata failed.\n");
+		pr_err("Allocation for metadata of size %d bytes failed.\n",
+									size);
 		return -ENOMEM;
 	}
 
@@ -165,8 +167,11 @@ int pas_init_image(enum pas_id id, const u8 *metadata, size_t size)
 	dma_free_attrs(NULL, size, mdata_buf, mdata_phys, &attrs);
 	scm_pas_disable_bw();
 
-	if (ret)
+	if (ret) {
+		print_hab_fail_codes();
 		return ret;
+	}
+
 	return scm_ret;
 }
 EXPORT_SYMBOL(pas_init_image);

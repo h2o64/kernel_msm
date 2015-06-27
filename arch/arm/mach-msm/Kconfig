@@ -179,6 +179,7 @@ config ARCH_MSM8960
 	select MSM_USE_USER_ACCESSIBLE_TIMERS
 	select MSM_CPU_PWRCTL
 	select MSM_LPM_TEST
+	select HAS_MACH_MEMUTILS
 
 config ARCH_MSM8930
 	bool "MSM8930"
@@ -287,6 +288,7 @@ config ARCH_MSM8974
 	select ARCH_WANT_KMAP_ATOMIC_FLUSH
 	select KRAIT_REGULATOR
 	select ENABLE_VMALLOC_SAVINGS
+	select HAS_MACH_MEMUTILS
 
 config ARCH_APQ8084
 	bool "APQ8084"
@@ -529,6 +531,7 @@ config ARCH_MSM8226
 	select MSM_RPM_STATS_LOG
 	select ARCH_WANT_KMAP_ATOMIC_FLUSH
 	select ENABLE_VMALLOC_SAVINGS
+	select HAS_MACH_MEMUTILS
 
 config ARCH_MSMSAMARIUM
 	bool "MSMSAMARIUM"
@@ -1349,6 +1352,14 @@ choice
 		help
 		  Say Y here if you want the debug print routines to direct
 		  their output to the serial port on MSM 8226 devices.
+
+	config DEBUG_MSM8610_UART
+		bool "Kernel low-level debugging messages via MSM 8610 UART"
+		depends on ARCH_MSM8610
+		select MSM_HAS_DEBUG_UART_HS_V14
+		help
+		  Say Y here if you want the debug print routines to direct
+		  their output to the serial port on MSM 8610 devices.
 endchoice
 
 choice
@@ -2323,6 +2334,17 @@ config MSM_TZ_LOG
 	  produced by the Secure code (Trust zone). These messages provide
 	  diagnostic information about TZ operation.
 
+config MSM_TZ_LOG_WDOG_DUMP
+	bool "Dump TZ Log after watchdog reset"
+	depends on MSM_TZ_LOG
+	default n
+	help
+	  There are multiple kinds of fatal errors in TZ can trigger watchdog
+	  reset. From kernel log there is no evidence to tell what's the reset
+	  reason. After enabling this option, kernel will reserve a buffer
+	  to get TZ log backup. After a watchdog reset, kernel can print
+	  the log out.
+
 config MSM_RPM_LOG
 	tristate "MSM Resource Power Manager Log Driver"
 	depends on DEBUG_FS
@@ -2427,6 +2449,16 @@ config MSM_WATCHDOG_V2
 		watchdog times out. It allows for detection of cpu hangs and
 		deadlocks. It does not run during the bootup process, so it will
 		not catch any early lockups.
+
+config MSM_WATCHDOG_CTX_PRINT
+	bool "Print context dump saved by secure mode watchdog handler"
+	default n
+	depends on MSM_WATCHDOG_V2
+	help
+		After enabling this option, kernel will reserve bigger buffer
+		for secure mode watchdog handler to save info. And kernel will
+		try to print the info if it looks valid.
+		If unsure, say N
 
 config MSM_MEMORY_DUMP
 	bool "MSM Memory Dump Support"
@@ -3043,6 +3075,91 @@ config KRAIT_REGULATOR
 	 line from the PMIC. This supply line is powered by multiple
 	 regulators running in ganged mode inside the PMIC. Enable
 	 this option to support such configurations.
+
+config HAS_MACH_MEMUTILS
+	default n
+	bool "Motorola MSM memcpy enhancements"
+	help
+	Faster memcpy performance for Krait
+
+config MMI_RAM_INFO
+	depends on ARCH_MSM
+	default n
+	bool "Motorola Mobility RAM Info"
+	help
+	Provide mechanism to access RAM size and MR registers values via sysfs.
+
+config MMI_UNIT_INFO
+	depends on ARCH_MSM
+	default n
+	bool "Motorola Mobility Unit Info"
+	help
+	Provide mechanism to expose unit information to other cpu via smem.
+
+config MMI_SOC_INFO
+	depends on ARCH_MSM
+	default n
+	bool "Motorola Mobility SOC Info"
+	help
+	Provide mechanism to annotate SOC info to panic data.
+
+config MMI_DEVICE_DTBS
+	depends on ARCH_MSM
+	default n
+	bool "Motorola Mobility Device DTBs"
+	help
+	  Only include Motorola device specific DTBs to limit the number that
+	  get built during kernel compilation.
+
+config MMI_TITAN_DTB
+	depends on ARCH_MSM8226
+	default n
+	bool "Motorola Titan Device DTBs"
+	help
+	  Only include Motorola Titan specific DTBs to limit the number that
+	  get built during kernel compilation.
+
+	  Titan is a Motorola device that uses MSM8226 chipset, which uses the
+	  MSM8226 defconfig.  Due to its many revisions, adding all of the device
+	  trees will consume at least 1MB of space.
+
+	  If unsure, say 'n'.
+
+config MMI_PEREGRINE_DTB
+	depends on ARCH_MSM8226
+	default n
+	bool "Motorola Peregrine Device DTBs"
+	help
+	  Only include Motorola Peregrine specific DTBs to limit the number that
+	  get built during kernel compilation.
+
+	  Peregrine is a Motorola device that uses MSM8926 chipset, which uses the
+	  MSM8226 defconfig.  Due to its many revisions, adding all of the device
+	  trees will consume at least 1MB of space.
+
+	  If unsure, say 'n'.
+
+config MMI_MSM_PINMUX
+	depends on ARCH_MSM
+	default n
+	bool "Motorola Mobility MSM OF DTS Pinmux Driver"
+	help
+	  Provides capability for reading an OF DT node to provide initial
+	  configuration of GPIO MUX settings on MSM chip families.
+
+config MMI_MSM_CLOCK
+	depends on ARCH_MSM
+	default n
+	bool "Motorola Mobility MSM OF DTS Clock Driver"
+	help
+	  Provides capability for reading an OF DT node to override Clock
+	  specific to MMI product on MSM chip families.
+
+config PM_DEBUG_WAKEUP
+	depends on PM_DEBUG
+    default n
+    bool "Report wakeup source in a uevent"
+
 endif
 
 config KERNEL_TEXT_MPU_PROT

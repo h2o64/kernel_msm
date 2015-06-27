@@ -45,6 +45,7 @@ allowed_warnings = set([
     "cpufreq_interactive.c:804",
     "cpufreq_interactive.c:847",
     "ene_ub6250.c:2118",
+    "workqueue.c:480"
  ])
 
 # Capture the name of the object file, can find it.

@@ -62,6 +62,10 @@ Optional properties :
 	This will be used to get value of usb power supply's VOLTAGE_NOW property,
 - qcom,utmi-clk-rate: Indicates refclk frequency (in Hz) to the core. If not
   specified, default of 19.2MHz is assumed.
+- pmic-id-gpio: If present, this is the gpio that is used to indicate host_detect
+- pmic-id-amux-chan: If present, this is the AMUX chan when pmic-id-gpio is Analog Input
+- pmic-id-pull: If present, this is the pull value when pmic-id-gpio is Digital Input
+- pmic-id-vin: If present, this is the voltage level when pmic-id-gpio is Digital Input
 
 Sub nodes:
 - Sub node for "DWC3- USB3 controller".

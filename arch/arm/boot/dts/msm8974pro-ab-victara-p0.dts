@@ -1,0 +1,101 @@
+/* Copyright (c) 2013 Motorola Mobility LLC
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+/dts-v1/;
+/include/ "msm8974pro-ab-moto-common.dtsi"
+/include/ "msm8974pro-victara-common.dtsi"
+
+
+/ {
+	qcom,msm-id = <217 0x4D 0x8000>, <217 0x4D 0x8100>;
+};
+
+&pm8941_boost {
+	status = "okay";
+	regulator-always-on;
+};
+
+&vbat_disp_vreg {
+	parent-supply = <&pm8941_boost>;
+};
+
+&spi_7 {
+	wm5110@0 {
+		SPKVDDL-supply = <&pm8941_boost>;
+		SPKVDDR-supply = <&pm8941_boost>;
+	};
+};
+
+&vph_pwr_vreg {
+	status = "disabled";
+};
+
+&pm8941_lsid1 {
+	qcom,leds@d300 {
+		torch-boost-supply = <&pm8941_boost>;
+	};
+};
+
+&pm8941_mvs2 {
+	parent-supply = <&pm8941_boost>;
+};
+
+&pm8941_chg {
+	otg-parent-supply = <&pm8941_boost>;
+};
+
+&i2c_2 {
+	tfa9890@34 {
+		compatible = "nxp,tfa9890";
+		reg = <0x34>;
+		gpios = <&pm8941_gpios 20 0>;     /* RESET */
+		tfa_vdd-supply = <&pm8941_s3>;
+		nxp,tfa_max-vol-steps = <15>;
+		nxp,tfa-dev = "left";
+	};
+};
+
+&soc {
+	sound {
+		qcom,tfa9890-left-name = "tfa9890.2-0034";
+	};
+};
+
+&cci {
+	qcom,camera@6c {
+		status = "ok";
+	};
+};
+
+&sdhc_1 {
+	qcom,bus-speed-mode = "HS200_1p8v", "DDR_1p8v";
+};
+
+&usb3 {
+        interrupt-map = <0x0 0 &intc 0 133 0>;
+        interrupt-names = "hs_phy_irq";
+        dwc_usb3-adc_tm = <0>;
+};
+
+&i2c_0 {
+	stm401@39 {
+		stm401_fw_version = "_p0";
+	};
+};
+
+&i2c_2 {
+	bcm2079x@76 {
+		gpios = <&msmgpio 31 0x0>, /* NFC_WAKE */
+			<&msmgpio 34 0x0>, /* NFC_IRQ */
+			<&msmgpio 32 0x0>; /* REG_PU */
+	};
+};
