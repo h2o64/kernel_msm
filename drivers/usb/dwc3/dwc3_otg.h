@@ -18,11 +18,14 @@
 
 #include <linux/workqueue.h>
 #include <linux/power_supply.h>
+#include <linux/hrtimer.h>
 
 #include <linux/usb/otg.h>
 #include "power.h"
 
-#define DWC3_IDEV_CHG_MAX 1500
+#define DWC3_IDEV_CHG_MAX 1300
+#define DWC3_IDEV_PROP_CHG_MAX 1200
+#define DWC3_IDEV_CHG_MIN 500
 
 struct dwc3_charger;
 
@@ -42,6 +45,7 @@ struct dwc3_otg {
 	void __iomem		*regs;
 	struct regulator	*vbus_otg;
 	struct delayed_work	sm_work;
+	struct delayed_work	phy_susp_work;
 	struct dwc3_charger	*charger;
 	struct dwc3_ext_xceiv	*ext_xceiv;
 #define ID		0
@@ -52,6 +56,9 @@ struct dwc3_otg {
 	int			host_bus_suspend;
 	int			charger_retry_count;
 	int			vbus_retry_count;
+	int			falsesdp_retry_count;
+	atomic_t		auto_susp_enabled;
+	struct timer_list       chg_check_timer;
 };
 
 /**

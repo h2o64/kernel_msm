@@ -25,6 +25,7 @@
 #include <mach/socinfo.h>
 #include <mach/rpm-smd.h>
 #include <mach/clock-generic.h>
+#include <mach/subsystem_restart.h>
 
 #include "clock-local2.h"
 #include "clock-pll.h"
@@ -879,6 +880,17 @@ static struct clk_freq_tbl ftbl_gcc_sdcc1_3_apps_clk[] = {
 	F_END
 };
 
+static struct clk_freq_tbl ftbl_gcc_sdcc2_apps_clk[] = {
+	F_GCC(    144000,         xo,  16,    3,   25),
+	F_GCC(    400000,         xo,  12,    1,    4),
+	F_GCC(  20000000,      gpll0,  15,    1,    2),
+	F_GCC(  23076923,      gpll0,  13,    1,    2),
+	F_GCC(  50000000,      gpll0,  12,    0,    0),
+	F_GCC( 100000000,      gpll0,   6,    0,    0),
+	F_GCC( 120000000,      gpll0,   5,    0,    0),
+	F_END
+};
+
 static struct rcg_clk sdcc1_apps_clk_src = {
 	.cmd_rcgr_reg = SDCC1_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
@@ -896,13 +908,13 @@ static struct rcg_clk sdcc1_apps_clk_src = {
 static struct rcg_clk sdcc2_apps_clk_src = {
 	.cmd_rcgr_reg = SDCC2_APPS_CMD_RCGR,
 	.set_rate = set_rate_mnd,
-	.freq_tbl = ftbl_gcc_sdcc1_3_apps_clk,
+	.freq_tbl = ftbl_gcc_sdcc2_apps_clk,
 	.current_freq = &rcg_dummy_freq,
 	.base = &virt_bases[GCC_BASE],
 	.c = {
 		.dbg_name = "sdcc2_apps_clk_src",
 		.ops = &clk_ops_rcg_mnd,
-		VDD_DIG_FMAX_MAP2(LOW, 100000000, NOMINAL, 200000000),
+		VDD_DIG_FMAX_MAP2(LOW, 100000000, NOMINAL, 120000000),
 		CLK_INIT(sdcc2_apps_clk_src.c),
 	},
 };
@@ -1986,7 +1998,7 @@ static struct rcg_clk mclk0_clk_src = {
 	},
 };
 
-static struct rcg_clk mclk1_clk_src = {
+struct rcg_clk mclk1_clk_src = {
 	.cmd_rcgr_reg = MCLK1_CMD_RCGR,
 	.set_rate = set_rate_mnd,
 	.freq_tbl = ftbl_camss_mclk0_1_clk,
@@ -2358,7 +2370,7 @@ static struct branch_clk camss_mclk0_clk = {
 	},
 };
 
-static struct branch_clk camss_mclk1_clk = {
+struct branch_clk camss_mclk1_clk = {
 	.cbcr_reg = CAMSS_MCLK1_CBCR,
 	.has_sibling = 0,
 	.base = &virt_bases[MMSS_BASE],
@@ -3282,11 +3294,20 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("dma_bam_pclk", gcc_bam_dma_ahb_clk.c, "msm_sps"),
 
 	/* I2C Clocks */
+	CLK_LOOKUP("iface_clk",          gcc_blsp1_ahb_clk.c, "f9924000.i2c"),
+	CLK_LOOKUP("core_clk", gcc_blsp1_qup2_i2c_apps_clk.c, "f9924000.i2c"),
+
+	CLK_LOOKUP("iface_clk",          gcc_blsp1_ahb_clk.c, "f9925000.i2c"),
+	CLK_LOOKUP("core_clk", gcc_blsp1_qup3_i2c_apps_clk.c, "f9925000.i2c"),
+
 	CLK_LOOKUP("iface_clk",          gcc_blsp1_ahb_clk.c, "f9926000.i2c"),
 	CLK_LOOKUP("core_clk", gcc_blsp1_qup4_i2c_apps_clk.c, "f9926000.i2c"),
 
 	CLK_LOOKUP("iface_clk", gcc_blsp1_ahb_clk.c, "f9927000.i2c"),
 	CLK_LOOKUP("core_clk", gcc_blsp1_qup5_i2c_apps_clk.c, "f9927000.i2c"),
+
+	CLK_LOOKUP("iface_clk", gcc_blsp1_ahb_clk.c, "f9928000.i2c"),
+	CLK_LOOKUP("core_clk", gcc_blsp1_qup6_i2c_apps_clk.c, "f9928000.i2c"),
 
 	/* I2C Clocks nfc */
 	CLK_LOOKUP("iface_clk",          gcc_blsp1_ahb_clk.c, "f9925000.i2c"),
@@ -3411,16 +3432,22 @@ static struct clk_lookup msm_clocks_8226[] = {
 	/* MM sensor clocks */
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6f.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk1_clk_src.c, "90.qcom,camera"),
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "32.qcom,camera"),
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6e.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6d.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6a.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6c.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "20.qcom,camera"),
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "79.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6f.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk1_clk.c, "90.qcom,camera"),
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "32.qcom,camera"),
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6e.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6d.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6a.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6c.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "20.qcom,camera"),
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "79.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "0.qcom,camera"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "1.qcom,camera"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "0.qcom,camera"),
@@ -3433,6 +3460,8 @@ static struct clk_lookup msm_clocks_8226[] = {
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "18.qcom,eeprom"),
 	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "6b.qcom,eeprom"),
 	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "6b.qcom,eeprom"),
+	CLK_LOOKUP("cam_src_clk", mclk0_clk_src.c, "f0.qcom,eeprom"),
+	CLK_LOOKUP("cam_clk", camss_mclk0_clk.c, "f0.qcom,eeprom"),
 
 	/* CCI clocks */
 	CLK_LOOKUP("camss_top_ahb_clk", camss_top_ahb_clk.c,
@@ -3725,39 +3754,39 @@ static void __init msm8226_clock_pre_init(void)
 {
 	virt_bases[GCC_BASE] = ioremap(GCC_CC_PHYS, GCC_CC_SIZE);
 	if (!virt_bases[GCC_BASE])
-		panic("clock-8226: Unable to ioremap GCC memory!");
+		PR_BUG("clock-8226: Unable to ioremap GCC memory!");
 
 	virt_bases[MMSS_BASE] = ioremap(MMSS_CC_PHYS, MMSS_CC_SIZE);
 	if (!virt_bases[MMSS_BASE])
-		panic("clock-8226: Unable to ioremap MMSS_CC memory!");
+		PR_BUG("clock-8226: Unable to ioremap MMSS_CC memory!");
 
 	virt_bases[LPASS_BASE] = ioremap(LPASS_CC_PHYS, LPASS_CC_SIZE);
 	if (!virt_bases[LPASS_BASE])
-		panic("clock-8226: Unable to ioremap LPASS_CC memory!");
+		PR_BUG("clock-8226: Unable to ioremap LPASS_CC memory!");
 
 	virt_bases[APCS_BASE] = ioremap(APCS_KPSS_GLB_PHYS,
 		APCS_KPSS_GLB_SIZE);
 	if (!virt_bases[APCS_BASE])
-		panic("clock-8226: Unable to ioremap APCS_GCC_CC memory!");
+		PR_BUG("clock-8226: Unable to ioremap APCS_GCC_CC memory!");
 
 	virt_bases[APCS_PLL_BASE] = ioremap(APCS_KPSS_SH_PLL_PHYS,
 		APCS_KPSS_SH_PLL_SIZE);
 	if (!virt_bases[APCS_PLL_BASE])
-		panic("clock-8226: Unable to ioremap APCS_GCC_CC memory!");
+		PR_BUG("clock-8226: Unable to ioremap APCS_GCC_CC memory!");
 
 	clk_ops_local_pll.enable = sr_hpm_lp_pll_clk_enable;
 
 	vdd_dig.regulator[0] = regulator_get(NULL, "vdd_dig");
 	if (IS_ERR(vdd_dig.regulator[0]))
-		panic("clock-8226: Unable to get the vdd_dig regulator!");
+		PR_BUG("clock-8226: Unable to get the vdd_dig regulator!");
 
 	vdd_sr2_pll.regulator[0] = regulator_get(NULL, "vdd_sr2_pll");
 	if (IS_ERR(vdd_sr2_pll.regulator[0]))
-		panic("clock-8226: Unable to get the sr2_pll regulator!");
+		PR_BUG("clock-8226: Unable to get the sr2_pll regulator!");
 
 	vdd_sr2_pll.regulator[1] = regulator_get(NULL, "vdd_sr2_dig");
 	if (IS_ERR(vdd_sr2_pll.regulator[1]))
-		panic("clock-8226: Unable to get the vdd_sr2_dig regulator!");
+		PR_BUG("clock-8226: Unable to get the vdd_sr2_dig regulator!");
 
 
 	enable_rpm_scaling();

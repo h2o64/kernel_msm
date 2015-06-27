@@ -54,6 +54,8 @@
 #define DAPM_MICBIAS2_EXTERNAL_STANDALONE "MIC BIAS2 External Standalone"
 #define DAPM_MICBIAS3_EXTERNAL_STANDALONE "MIC BIAS3 External Standalone"
 
+#define DAPM_MICBIAS3_EXTERNAL_STANDALONE "MIC BIAS3 External Standalone"
+
 /* RX_HPH_CNP_WG_TIME increases by 0.24ms */
 #define TAIKO_WG_TIME_FACTOR_US	240
 
@@ -61,6 +63,8 @@ static atomic_t kp_taiko_priv;
 static int spkr_drv_wrnd_param_set(const char *val,
 				   const struct kernel_param *kp);
 static int spkr_drv_wrnd = 1;
+
+static int micbias3_standalone_enabled;
 
 static struct kernel_param_ops spkr_drv_wrnd_param_ops = {
 	.set = spkr_drv_wrnd_param_set,
@@ -1060,6 +1064,50 @@ static int taiko_config_compander(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+static int taiko_get_micbias3(struct snd_kcontrol *kcontrol,
+			       struct snd_ctl_elem_value *ucontrol)
+{
+
+	ucontrol->value.integer.value[0] = micbias3_standalone_enabled;
+	return 0;
+}
+
+static int taiko_set_micbias3(struct snd_kcontrol *kcontrol,
+			       struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
+	int value = ucontrol->value.integer.value[0];
+	struct snd_soc_dapm_widget *w;
+	int rc = 0;
+
+	pr_debug("%s: enable micbias 3 standalone %d,\n",
+		 __func__, value);
+
+	micbias3_standalone_enabled = value;
+
+	if (micbias3_standalone_enabled)
+		rc = snd_soc_dapm_force_enable_pin(&codec->dapm,
+					     DAPM_MICBIAS3_EXTERNAL_STANDALONE);
+	else {
+		/* Don't turn off mic bias 3 if the widget power is on, parallel
+		 * capture session voip/camcorder could be running, dapm will
+		 * turn it off when capture session ends.
+		*/
+		w = snd_soc_get_codec_widget(codec->card,
+						codec, "MIC BIAS3 External");
+		if ((w != NULL) && w->power)
+			goto out;
+
+		rc = snd_soc_dapm_disable_pin(&codec->dapm,
+					DAPM_MICBIAS3_EXTERNAL_STANDALONE);
+	}
+	if (!rc)
+		snd_soc_dapm_sync(&codec->dapm);
+
+out:
+	pr_debug("%s: leave ret %d\n", __func__, rc);
+	return rc;
+}
 
 
 static const char *const taiko_anc_func_text[] = {"OFF", "ON"};
@@ -1425,6 +1473,9 @@ static const struct snd_kcontrol_new taiko_snd_controls[] = {
 	SOC_ENUM_EXT("MAD Input", taiko_conn_mad_enum,
 			taiko_mad_input_get, taiko_mad_input_put),
 
+	SOC_SINGLE_EXT("Mic Bias3 Enable", SND_SOC_NOPM, 0, 1, 0,
+		       taiko_get_micbias3, taiko_set_micbias3),
+
 };
 
 static int taiko_pa_gain_get(struct snd_kcontrol *kcontrol,
@@ -1555,8 +1606,13 @@ static int taiko_hph_impedance_get(struct snd_kcontrol *kcontrol,
 	mc = (struct soc_multi_mixer_control *)(kcontrol->private_value);
 
 	hphr = mc->shift;
+	pr_debug("%s: taiko_priv: %p\n", __func__, priv);
+#ifndef CONFIG_SND_SOC_TPA6165A2
 	wcd9xxx_mbhc_get_impedance(&priv->mbhc, &zl, &zr);
 	pr_debug("%s: zl %u, zr %u\n", __func__, zl, zr);
+#else
+	zr = zl = 0;
+#endif
 	ucontrol->value.integer.value[0] = hphr ? zr : zl;
 
 	return 0;
@@ -2397,6 +2453,44 @@ static const struct snd_kcontrol_new aif_cap_mixer[] = {
 	SOC_SINGLE_EXT("SLIM TX10", SND_SOC_NOPM, TAIKO_TX10, 1, 0,
 			slim_tx_mixer_get, slim_tx_mixer_put),
 };
+
+static int micb_mixer_mixer_get(struct snd_kcontrol *kcontrol,
+			   struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dapm_widget_list *wlist = snd_kcontrol_chip(kcontrol);
+	struct snd_soc_dapm_widget *widget = wlist->widgets[0];
+
+	ucontrol->value.enumerated.item[0] = widget->value;
+	return 0;
+}
+
+static int micb_mixer_mixer_put(struct snd_kcontrol *kcontrol,
+			     struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dapm_widget_list *wlist = snd_kcontrol_chip(kcontrol);
+	struct snd_soc_dapm_widget *widget = wlist->widgets[0];
+	struct snd_soc_codec *codec = widget->codec;
+	u32 enable = ucontrol->value.integer.value[0];
+
+	pr_debug("%s: wname %s cname %s value %u shift %d item %ld\n", __func__,
+		widget->name, ucontrol->id.name, widget->value, widget->shift,
+		ucontrol->value.integer.value[0]);
+
+	mutex_lock(&codec->mutex);
+
+
+	snd_soc_dapm_mixer_update_power(widget, kcontrol, enable);
+
+	mutex_unlock(&codec->mutex);
+	return 0;
+}
+
+static const struct snd_kcontrol_new micb_mixer[] = {
+	SOC_SINGLE_EXT("MIC BIAS3 External", SND_SOC_NOPM, TAIKO_TX1, 1, 0,
+			micb_mixer_mixer_get, micb_mixer_mixer_put),
+
+};
+
 
 static void taiko_codec_enable_adc_block(struct snd_soc_codec *codec,
 					 int enable)
@@ -3298,6 +3392,7 @@ static int taiko_hphl_dac_event(struct snd_soc_dapm_widget *w,
 						 WCD9XXX_CLSH_STATE_HPHL,
 						 WCD9XXX_CLSH_REQ_ENABLE,
 						 WCD9XXX_CLSH_EVENT_PRE_DAC);
+#ifndef CONFIG_SND_SOC_TPA6165A2
 		ret = wcd9xxx_mbhc_get_impedance(&taiko_p->mbhc,
 					&impedl, &impedr);
 		if (!ret)
@@ -3305,6 +3400,10 @@ static int taiko_hphl_dac_event(struct snd_soc_dapm_widget *w,
 		else
 			dev_err(codec->dev, "Failed to get mbhc impedance %d\n",
 						ret);
+#else
+		impedl = impedr = 0;
+		ret = 0;
+#endif
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		snd_soc_update_bits(codec, TAIKO_A_CDC_CLK_RDAC_CLK_EN_CTL,
@@ -5847,6 +5946,10 @@ static const struct snd_soc_dapm_widget taiko_dapm_widgets[] = {
 			       7, 0, taiko_codec_enable_micbias,
 			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
 			       SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_MICBIAS_E(DAPM_MICBIAS3_EXTERNAL_STANDALONE, SND_SOC_NOPM,
+			       7, 0, taiko_codec_enable_micbias,
+			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
+			       SND_SOC_DAPM_POST_PMD),
 	SND_SOC_DAPM_MICBIAS_E("MIC BIAS2 External", SND_SOC_NOPM, 7, 0,
 			       taiko_codec_enable_micbias,
 			       SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
@@ -7215,6 +7318,8 @@ static int taiko_codec_probe(struct snd_soc_codec *codec)
 		dev_err(codec->dev, "%s hwdep failed %d\n", __func__, ret);
 		goto err_hwdep;
 	}
+
+#ifndef CONFIG_SND_SOC_TPA6165A2
 	/* init and start mbhc */
 	ret = wcd9xxx_mbhc_init(&taiko->mbhc, &taiko->resmgr, codec,
 				taiko_enable_mbhc_micbias,
@@ -7224,6 +7329,7 @@ static int taiko_codec_probe(struct snd_soc_codec *codec)
 		pr_err("%s: mbhc init failed %d\n", __func__, ret);
 		goto err_hwdep;
 	}
+#endif
 
 	taiko->codec = codec;
 	for (i = 0; i < COMPANDER_MAX; i++) {

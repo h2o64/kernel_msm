@@ -854,6 +854,7 @@ static void msm_hs_set_bps_locked(struct uart_port *uport,
 	case 3500000:
 	case 3000000:
 	case 2500000:
+	case 2000000:
 	case 1500000:
 	case 1152000:
 	case 1000000:
@@ -1091,6 +1092,8 @@ static void msm_hs_set_termios(struct uart_port *uport,
 			ret = wait_event_timeout(msm_uport->rx.wait,
 				msm_uport->rx_bam_inprogress == false,
 				RX_FLUSH_COMPLETE_TIMEOUT);
+		/* make sure rx tasklet finishes */
+		tasklet_kill(&msm_uport->rx.tlet);
 		ret = sps_rx_disconnect(sps_pipe_handle);
 		if (ret)
 			MSM_HS_ERR("%s(): sps_disconnect failed\n",
@@ -3206,6 +3209,9 @@ static void msm_hs_shutdown(struct uart_port *uport)
 		free_irq(msm_uport->wakeup.irq, msm_uport);
 
 	msm_hs_unconfig_uart_gpios(uport);
+
+	if (wake_lock_active(&msm_uport->rx.wake_lock))
+		wake_unlock(&msm_uport->rx.wake_lock);
 }
 
 static void __exit msm_serial_hs_exit(void)

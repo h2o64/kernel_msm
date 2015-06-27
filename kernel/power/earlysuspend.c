@@ -45,6 +45,16 @@ enum {
 };
 static int state;
 
+#ifdef CONFIG_PM_SYNC_BEFORE_SUSPEND
+static int earlysuspendsync = 1;
+#else
+static int earlysuspendsync;
+#endif
+
+static struct task_struct *current_handler;
+static void handler_timeout(unsigned long data);
+static DEFINE_TIMER(handler_wd, handler_timeout, 0, 0);
+
 void register_early_suspend(struct early_suspend *handler)
 {
 	struct list_head *pos;
@@ -70,6 +80,27 @@ void unregister_early_suspend(struct early_suspend *handler)
 	mutex_unlock(&early_suspend_lock);
 }
 EXPORT_SYMBOL(unregister_early_suspend);
+
+static void handler_timeout(unsigned long data)
+{
+	pr_emerg("**** early suspend / late resume timeout at %pf\n",
+			(void *)data);
+	sched_show_task(current_handler);
+	BUG();
+}
+
+static void handler_wdset(void *function)
+{
+	current_handler = current;
+	handler_wd.data = (unsigned long)function;
+	mod_timer(&handler_wd, jiffies + (HZ * 12));
+}
+
+static void handler_wdclr(void)
+{
+	del_timer_sync(&handler_wd);
+	current_handler = NULL;
+}
 
 static void early_suspend(struct work_struct *work)
 {
@@ -98,15 +129,18 @@ static void early_suspend(struct work_struct *work)
 		if (pos->suspend != NULL) {
 			if (debug_mask & DEBUG_VERBOSE)
 				pr_info("early_suspend: calling %pf\n", pos->suspend);
+			handler_wdset(pos->suspend);
 			pos->suspend(pos);
+			handler_wdclr();
 		}
 	}
 	mutex_unlock(&early_suspend_lock);
 
-	if (debug_mask & DEBUG_SUSPEND)
-		pr_info("early_suspend: sync\n");
-
-	sys_sync();
+	if (earlysuspendsync) {
+		if (debug_mask & DEBUG_SUSPEND)
+			pr_info("early_suspend: sync\n");
+		sys_sync();
+	}
 abort:
 	spin_lock_irqsave(&state_lock, irqflags);
 	if (state == SUSPEND_REQUESTED_AND_SUSPENDED)
@@ -140,7 +174,9 @@ static void late_resume(struct work_struct *work)
 			if (debug_mask & DEBUG_VERBOSE)
 				pr_info("late_resume: calling %pf\n", pos->resume);
 
+			handler_wdset(pos->resume);
 			pos->resume(pos);
+			handler_wdclr();
 		}
 	}
 	if (debug_mask & DEBUG_SUSPEND)
@@ -185,3 +221,11 @@ suspend_state_t get_suspend_state(void)
 {
 	return requested_suspend_state;
 }
+
+static int __init earlysuspendsync_setup(char *str)
+{
+	earlysuspendsync = simple_strtoul(str, NULL, 0);
+	return 1;
+}
+
+__setup("earlysuspendsync=", earlysuspendsync_setup);

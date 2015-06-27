@@ -108,6 +108,7 @@ enum battery_type {
  * @iterm_ua:		termination current of the battery when charging
  *			to 100%
  * @batt_id_kohm:	the best matched battery id resistor value
+ * @max_current_ma:	max current of the battery
  */
 
 struct bms_battery_data {
@@ -125,11 +126,14 @@ struct bms_battery_data {
 	int			cutoff_uv;
 	int			iterm_ua;
 	int			batt_id_kohm;
+	int			max_current_ma;
+	char			name[255];
 };
 
 #if defined(CONFIG_PM8921_BMS) || \
 	defined(CONFIG_PM8921_BMS_MODULE) || \
-	defined(CONFIG_QPNP_BMS)
+	defined(CONFIG_QPNP_BMS) || \
+	defined(CONFIG_MMI_QPNP_BMS)
 extern struct bms_battery_data  palladium_1500_data;
 extern struct bms_battery_data  desay_5200_data;
 extern struct bms_battery_data  oem_batt_data;

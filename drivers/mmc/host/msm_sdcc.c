@@ -349,6 +349,7 @@ static void msmsdcc_soft_reset(struct msmsdcc_host *host)
 			mb();
 		}
 	} else {
+		mmc_cmd_log(host->mmc, 0, 0);
 		writel_relaxed(0, host->base + MMCICOMMAND);
 		msmsdcc_sync_reg_wr(host);
 		writel_relaxed(0, host->base + MMCIDATACTRL);
@@ -583,6 +584,7 @@ static inline void msmsdcc_delay(struct msmsdcc_host *host)
 static inline void
 msmsdcc_start_command_exec(struct msmsdcc_host *host, u32 arg, u32 c)
 {
+	mmc_cmd_log(host->mmc, c, arg);
 	writel_relaxed(arg, host->base + MMCIARGUMENT);
 	writel_relaxed(c, host->base + MMCICOMMAND);
 	/*
@@ -1786,6 +1788,7 @@ static void msmsdcc_do_cmdirq(struct msmsdcc_host *host, uint32_t status)
 	host->curr.cmd = NULL;
 	if (mmc_resp_type(cmd))
 		cmd->resp[0] = readl_relaxed(host->base + MMCIRESPONSE0);
+	mmc_cmd_log_resp(host->mmc, cmd->resp[0]);
 	/*
 	 * Read rest of the response registers only if
 	 * long response is expected for this command
@@ -1881,6 +1884,12 @@ msmsdcc_irq(int irq, void *dev_id)
 		}
 
 		if (!atomic_read(&host->clks_on)) {
+			if (!host->pwr) {
+				pr_warn("%s: spurious interrupt detected\n",
+					mmc_hostname(host->mmc));
+				ret = 1;
+				break;
+			}
 			pr_debug("%s: %s: SDIO async irq received\n",
 					mmc_hostname(host->mmc), __func__);
 
@@ -2281,12 +2290,20 @@ msmsdcc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	spin_lock_irqsave(&host->lock, flags);
 
 	/*
-	 * Set timeout value to 10 secs (or more in case of buggy cards)
+	 * Set the controller catch-all timer to:
+	 *  - 20s for quirky cards
+	 * otherwise:
+	 *  - 500ms for CMD13
+	 *  - 8s for everything else
 	 */
 	if ((mmc->card) && (mmc->card->quirks & MMC_QUIRK_INAND_DATA_TIMEOUT))
 		host->curr.req_tout_ms = 20000;
-	else
-		host->curr.req_tout_ms = MSM_MMC_REQ_TIMEOUT;
+	else {
+		if (mrq->cmd->opcode == MMC_SEND_STATUS)
+			host->curr.req_tout_ms = 500;
+		else
+			host->curr.req_tout_ms = MSM_MMC_REQ_TIMEOUT;
+	}
 	/*
 	 * Kick the software request timeout timer here with the timeout
 	 * value identified above
@@ -3504,7 +3521,8 @@ msmsdcc_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 			"tuning_in_progress but SDCC clocks are OFF\n");
 
 	/* Let interrupts be disabled if the host is powered off */
-	if (ios->power_mode != MMC_POWER_OFF && host->sdcc_irq_disabled) {
+	if (ios->power_mode != MMC_POWER_OFF &&
+		ios->power_mode != MMC_POWER_UP && host->sdcc_irq_disabled) {
 		enable_irq(host->core_irqres->start);
 		host->sdcc_irq_disabled = 0;
 	}
@@ -4493,6 +4511,9 @@ msmsdcc_check_status(unsigned long data)
 					" is ACTIVE_HIGH\n",
 					mmc_hostname(host->mmc),
 					host->oldstat, status);
+			host->mmc->card_bad = 0;
+			host->mmc->requests = 0ULL;
+			host->mmc->request_errors = 0ULL;
 			mmc_detect_change(host->mmc, 0);
 		}
 		host->oldstat = status;
@@ -5839,6 +5860,8 @@ static struct mmc_platform_data *msmsdcc_populate_pdata(struct device *dev)
 		pdata->xpc_cap = true;
 	if (of_get_property(np, "qcom,nonremovable", NULL))
 		pdata->nonremovable = true;
+	if (of_get_property(np, "qcom,emmc", NULL))
+		pdata->is_emmc = true;
 	if (of_get_property(np, "qcom,disable-cmd23", NULL))
 		pdata->disable_cmd23 = true;
 	of_property_read_u32(np, "qcom,dat1-mpm-int",
@@ -6108,6 +6131,7 @@ msmsdcc_probe(struct platform_device *pdev)
 	mmc->ocr_avail = plat->ocr_mask;
 	mmc->clkgate_delay = MSM_MMC_CLK_GATE_DELAY;
 
+	mmc->max_pwrclass = plat->msmsdcc_max_pwrclass;
 	mmc->pm_caps |= MMC_PM_KEEP_POWER | MMC_PM_WAKE_SDIO_IRQ;
 	mmc->caps |= plat->mmc_bus_width;
 	mmc->caps |= MMC_CAP_MMC_HIGHSPEED | MMC_CAP_SD_HIGHSPEED;
@@ -6135,7 +6159,7 @@ msmsdcc_probe(struct platform_device *pdev)
 
 	mmc->caps2 |= MMC_CAP2_PACKED_WR;
 	mmc->caps2 |= MMC_CAP2_PACKED_WR_CONTROL;
-	mmc->caps2 |= (MMC_CAP2_BOOTPART_NOACC | MMC_CAP2_DETECT_ON_ERR);
+	mmc->caps2 |= MMC_CAP2_BOOTPART_NOACC;
 	mmc->caps2 |= MMC_CAP2_SANITIZE;
 	mmc->caps2 |= MMC_CAP2_CACHE_CTRL;
 	mmc->caps2 |= MMC_CAP2_POWEROFF_NOTIFY;
@@ -6144,6 +6168,8 @@ msmsdcc_probe(struct platform_device *pdev)
 
 	if (plat->nonremovable)
 		mmc->caps |= MMC_CAP_NONREMOVABLE;
+	if (plat->is_emmc)
+		mmc->caps2 |= MMC_CAP2_MMC_ONLY;
 	mmc->caps |= MMC_CAP_SDIO_IRQ;
 
 	if (plat->is_sdio_al_client)

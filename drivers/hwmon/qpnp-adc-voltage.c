@@ -783,8 +783,8 @@ static void qpnp_vadc_625mv_channel_sel(struct qpnp_vadc_chip *vadc,
 	uint32_t dt_index = 0;
 
 	/* Check if the buffered 625mV channel exists */
-	while ((vadc->adc->adc_channels[dt_index].channel_num
-		!= SPARE1) && (dt_index < vadc->max_channels_available))
+	while ((dt_index < vadc->max_channels_available) &&
+		(vadc->adc->adc_channels[dt_index].channel_num != SPARE1))
 		dt_index++;
 
 	if (dt_index >= vadc->max_channels_available) {
@@ -1034,10 +1034,11 @@ struct qpnp_vadc_chip *qpnp_get_vadc(struct device *dev, const char *name)
 }
 EXPORT_SYMBOL(qpnp_get_vadc);
 
-int32_t qpnp_vadc_conv_seq_request(struct qpnp_vadc_chip *vadc,
-				enum qpnp_vadc_trigger trigger_channel,
+static int32_t qpnp_vadc_conv_seq_request_base(struct qpnp_vadc_chip *vadc,
+					enum qpnp_vadc_trigger trigger_channel,
 					enum qpnp_vadc_channels channel,
-					struct qpnp_vadc_result *result)
+					struct qpnp_vadc_result *result,
+					int pmsafe)
 {
 	int rc = 0, scale_type, amux_prescaling, dt_index = 0;
 	uint32_t ref_channel, count = 0;
@@ -1187,25 +1188,46 @@ fail_unlock:
 
 	return rc;
 }
+
+int32_t qpnp_vadc_conv_seq_request(struct qpnp_vadc_chip *vadc,
+				enum qpnp_vadc_trigger trigger_channel,
+					enum qpnp_vadc_channels channel,
+					struct qpnp_vadc_result *result)
+{
+	return qpnp_vadc_conv_seq_request_base(vadc, trigger_channel, channel,
+					result, 0);
+}
 EXPORT_SYMBOL(qpnp_vadc_conv_seq_request);
 
-int32_t qpnp_vadc_read(struct qpnp_vadc_chip *vadc,
+int32_t qpnp_vadc_conv_seq_request_pmsafe(struct qpnp_vadc_chip *vadc,
+					enum qpnp_vadc_trigger trigger_channel,
+					enum qpnp_vadc_channels channel,
+					struct qpnp_vadc_result *result)
+{
+	return qpnp_vadc_conv_seq_request_base(vadc, trigger_channel, channel,
+					result, 1);
+}
+EXPORT_SYMBOL(qpnp_vadc_conv_seq_request_pmsafe);
+
+int32_t qpnp_vadc_read_base(struct qpnp_vadc_chip *vadc,
 				enum qpnp_vadc_channels channel,
-				struct qpnp_vadc_result *result)
+				struct qpnp_vadc_result *result,
+				int pmsafe)
 {
 	struct qpnp_vadc_result die_temp_result;
 	int rc = 0;
 
 	if (channel == VBAT_SNS) {
-		rc = qpnp_vadc_conv_seq_request(vadc, ADC_SEQ_NONE,
-				channel, result);
+		rc = qpnp_vadc_conv_seq_request_base(vadc, ADC_SEQ_NONE,
+						channel, result, pmsafe);
 		if (rc < 0) {
 			pr_err("Error reading vbatt\n");
 			return rc;
 		}
 
-		rc = qpnp_vadc_conv_seq_request(vadc, ADC_SEQ_NONE,
-				DIE_TEMP, &die_temp_result);
+		rc = qpnp_vadc_conv_seq_request_base(vadc, ADC_SEQ_NONE,
+						DIE_TEMP, &die_temp_result,
+						pmsafe);
 		if (rc < 0) {
 			pr_err("Error reading die_temp\n");
 			return rc;
@@ -1218,10 +1240,25 @@ int32_t qpnp_vadc_read(struct qpnp_vadc_chip *vadc,
 
 		return 0;
 	} else
-		return qpnp_vadc_conv_seq_request(vadc, ADC_SEQ_NONE,
-				channel, result);
+		return qpnp_vadc_conv_seq_request_base(vadc, ADC_SEQ_NONE,
+						channel, result, pmsafe);
+}
+
+int32_t qpnp_vadc_read(struct qpnp_vadc_chip *vadc,
+				enum qpnp_vadc_channels channel,
+				struct qpnp_vadc_result *result)
+{
+	return qpnp_vadc_read_base(vadc, channel, result, 0);
 }
 EXPORT_SYMBOL(qpnp_vadc_read);
+
+int32_t qpnp_vadc_read_pmsafe(struct qpnp_vadc_chip *vadc,
+				enum qpnp_vadc_channels channel,
+				struct qpnp_vadc_result *result)
+{
+	return qpnp_vadc_read_base(vadc, channel, result, 1);
+}
+EXPORT_SYMBOL(qpnp_vadc_read_pmsafe);
 
 static void qpnp_vadc_lock(struct qpnp_vadc_chip *vadc)
 {
@@ -1393,6 +1430,16 @@ hwmon_err_sens:
 	return rc;
 }
 
+int32_t qpnp_vadc_get_batt_therm_type(struct qpnp_vadc_chip *qpnp_vadc)
+{
+
+	if (!qpnp_vadc || !(qpnp_vadc->adc) || !(qpnp_vadc->adc->adc_prop))
+		return 0;
+
+	return qpnp_vadc->adc->adc_prop->batt_therm_type;
+}
+EXPORT_SYMBOL(qpnp_vadc_get_batt_therm_type);
+
 static int __devinit qpnp_vadc_probe(struct spmi_device *spmi)
 {
 	struct qpnp_vadc_chip *vadc;
@@ -1534,6 +1581,7 @@ static int qpnp_vadc_suspend_noirq(struct device *dev)
 	struct qpnp_vadc_chip *vadc = dev_get_drvdata(dev);
 	u8 status = 0;
 
+	/* PM Safe might need to be added to this function */
 	if (vadc->vadc_poll_eoc) {
 		qpnp_vadc_read_reg(vadc, QPNP_VADC_STATUS1, &status);
 		status &= QPNP_VADC_STATUS1_REQ_STS_EOC_MASK;

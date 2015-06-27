@@ -11,6 +11,7 @@
  *  Copyright (C) 2004-2006 Ingo Molnar
  *  Copyright (C) 2004 William Lee Irwin III
  */
+#define REALLY_WANT_DEBUGFS
 #include <linux/ring_buffer.h>
 #include <generated/utsrelease.h>
 #include <linux/stacktrace.h>
@@ -237,7 +238,7 @@ int tracing_is_enabled(void)
  * to not have to wait for all that output. Anyway this can be
  * boot time and run time configurable.
  */
-#define TRACE_BUF_SIZE_DEFAULT	1441792UL /* 16384 * 88 (sizeof(entry)) */
+#define TRACE_BUF_SIZE_DEFAULT	262144UL /* 1024 * 256 */
 
 static unsigned long		trace_buf_size = TRACE_BUF_SIZE_DEFAULT;
 
@@ -1117,7 +1118,14 @@ static void trace_save_cmdline(struct task_struct *tsk)
 		cmdline_idx = idx;
 	}
 
-	memcpy(&saved_cmdlines[idx], tsk->comm, TASK_COMM_LEN);
+	/* we don't hold the task lock to protect comm, so it may be
+	 * incomplete yet and save a non-terminating string in the
+	 * saved_cmdlines array which is not safe for string read.
+	 *
+	 * Only read the first 15 bytes in order to keep a trailing
+	 * '\0' in the saved_cmdlines array.
+	 */
+	memcpy(&saved_cmdlines[idx], tsk->comm, TASK_COMM_LEN - 1);
 
 	arch_spin_unlock(&trace_cmdline_lock);
 }
@@ -1145,7 +1153,7 @@ void trace_find_cmdline(int pid, char comm[])
 	arch_spin_lock(&trace_cmdline_lock);
 	map = map_pid_to_cmdline[pid];
 	if (map != NO_CMDLINE_MAP)
-		strcpy(comm, saved_cmdlines[map]);
+		strlcpy(comm, saved_cmdlines[map], TASK_COMM_LEN);
 	else
 		strcpy(comm, "<...>");
 
@@ -3024,8 +3032,14 @@ static int __tracing_resize_ring_buffer(unsigned long size)
 	max_tr.entries = size;
  out:
 	global_trace.entries = size;
+	trace_buf_size = size;
 
 	return ret;
+}
+
+unsigned long tracing_get_trace_buf_size(void)
+{
+	return trace_buf_size;
 }
 
 static ssize_t tracing_resize_ring_buffer(unsigned long size)
