@@ -768,15 +768,17 @@
 	};
 
 	ak8963@0c {
-		compatible = "akm,akm8963";
-		reg = <0x0c>;
-		vdd-supply = <&pm8226_l19>;
+		compatible = "motorola_compass,akm8963";
+		reg = <0xc>;
 		interrupt-parent = <&msmgpio>;
 		interrupts = <66 0x2>;
-		akm,gpio-irq = <&msmgpio 66 0>;
-		akm,gpio-rst = <&msmgpio 62 0>;
-		akm,outbit = <1>;
-		akm,layout = <6>;
+		vdd-supply = <&pm8226_l19>;
+		SR_1v8-supply = <&pm8226_l22>;
+		SR_2v85-supply = <&pm8226_l19>;
+		akm8963,layout = <6>;
+		akm8963,outbit = <1>;
+		akm8963,gpio_DRDY = <&msmgpio 66 0>;
+		akm8963,gpio_RST = <&msmgpio 62 0>;
 	};
 };
 
