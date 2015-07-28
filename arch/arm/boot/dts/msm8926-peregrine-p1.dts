@@ -135,7 +135,7 @@
 
 	ak8963@0c {
 		interrupts = <15 0x2>;
-		akm,gpio-irq = <&msmgpio 15 0>;
+		akm8963,gpio_DRDY = <&msmgpio 15 0>;
 	};
 };
 

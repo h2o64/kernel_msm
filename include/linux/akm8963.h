@@ -87,8 +87,9 @@ Defines a read-only address of the fuse ROM of the AK8963.*/
 struct akm8963_platform_data {
 	char layout;
 	char outbit;
-	int gpio_IRQ;
+	int gpio_DRDY;
 	int gpio_RST;
+	int (*power_LPM)(int on);
 };
 
 #endif
