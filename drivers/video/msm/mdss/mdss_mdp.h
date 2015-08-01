@@ -196,7 +196,6 @@ struct mdss_mdp_ctl {
 	struct mdss_mdp_mixer *mixer_left;
 	struct mdss_mdp_mixer *mixer_right;
 	struct mutex lock;
-	struct mutex offlock;
 	struct mutex *shared_lock;
 	spinlock_t spin_lock;
 
@@ -225,7 +224,6 @@ struct mdss_mdp_ctl {
 				struct mdss_mdp_ctl *sctl, int new_fps);
 
 	struct blocking_notifier_head notifier_head;
-	void (*ctx_dump_fnc) (struct mdss_mdp_ctl *ctl);
 
 	void *priv_data;
 	u32 wb_type;
@@ -599,7 +597,7 @@ int mdss_mdp_perf_bw_check(struct mdss_mdp_ctl *ctl,
 		struct mdss_mdp_pipe **right_plist, int right_cnt);
 int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
 	struct mdss_mdp_perf_params *perf, struct mdss_mdp_img_rect *roi,
-	bool apply_fudge, int tune);
+	bool apply_fudge);
 int mdss_mdp_ctl_notify(struct mdss_mdp_ctl *ctl, int event);
 void mdss_mdp_ctl_notifier_register(struct mdss_mdp_ctl *ctl,
 	struct notifier_block *notifier);
@@ -763,5 +761,4 @@ int mdss_mdp_pipe_program_pixel_extn(struct mdss_mdp_pipe *pipe);
 				(mfd->mdp.private1))->wb)
 
 int  mdss_mdp_ctl_reset(struct mdss_mdp_ctl *ctl);
-void mdss_mdp_footswitch_ctrl(struct mdss_data_type *mdata, int on);
 #endif /* MDSS_MDP_H */

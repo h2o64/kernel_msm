@@ -286,8 +286,7 @@ void dsi_ctrl_gpio_free(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 	}
 }
 
-int dsi_parse_vreg(struct device *dev, struct dss_module_power *mp,
-						struct device_node *node)
+static int dsi_parse_vreg(struct device *dev, struct dss_module_power *mp)
 {
 	int i = 0, rc = 0;
 	u32 tmp = 0;
@@ -297,13 +296,10 @@ int dsi_parse_vreg(struct device *dev, struct dss_module_power *mp,
 	if (!dev || !mp) {
 		pr_err("%s: invalid input\n", __func__);
 		rc = -EINVAL;
-		goto error;
+		return rc;
 	}
 
-	if (node)
-		np = node;
-	else
-		np = dev->of_node;
+	np = dev->of_node;
 
 	mp->num_vreg = 0;
 	for_each_child_of_node(np, supply_node) {
@@ -496,7 +492,7 @@ int dsi_ctrl_config_init(struct platform_device *pdev,
 {
 	int rc;
 
-	rc = dsi_parse_vreg(&pdev->dev, &ctrl_pdata->power_data, NULL);
+	rc = dsi_parse_vreg(&pdev->dev, &ctrl_pdata->power_data);
 	if (rc) {
 		pr_err("%s:%d unable to get the regulator resources",
 			__func__, __LINE__);

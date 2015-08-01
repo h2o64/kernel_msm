@@ -224,9 +224,6 @@ struct msm_fb_data_type {
 
 	struct msm_fb_splash_info splash_info;
 
-	bool splash_logo_enabled;
-
-
 	wait_queue_head_t ioctl_q;
 	atomic_t ioctl_ref_cnt;
 
@@ -240,14 +237,6 @@ struct msm_fb_data_type {
 	struct ion_client *fb_ion_client;
 	struct ion_handle *fb_ion_handle;
 };
-
-struct sys_panelinfo {
-	char *panel_name;
-	char *panel_supplier;
-	u64 *panel_ver;
-};
-
-extern struct sys_panelinfo panelinfo;
 
 static inline void mdss_fb_update_notify_update(struct msm_fb_data_type *mfd)
 {

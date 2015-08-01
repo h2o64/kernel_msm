@@ -772,8 +772,7 @@ static int msm_dsi_cmds_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 			}
 
 			if (dchdr->wait)
-				usleep_range(dchdr->wait * 1000,
-							dchdr->wait * 1000);
+				usleep(dchdr->wait * 1000);
 
 			mdss_dsi_buf_init(tp);
 			len = 0;
@@ -1563,8 +1562,8 @@ static struct device_node *dsi_find_panel_of_node(
 		dsi_pan_node = of_find_node_by_name(mdss_node,
 						    panel_name);
 		if (!dsi_pan_node) {
-			pr_err("%s: invalid pan node. panel_name=%s\n",
-							__func__, panel_name);
+			pr_err("%s: invalid pan node\n",
+			       __func__);
 			dsi_pan_node = dsi_pref_prim_panel(pdev);
 		}
 	}
@@ -1721,8 +1720,6 @@ static int __devinit msm_dsi_probe(struct platform_device *pdev)
 
 	cmd_cfg_cont_splash = mdp3_panel_get_boot_cfg() ? true : false;
 
-	ctrl_pdata->pdev = pdev;
-	ctrl_pdata->get_dt_vreg_data = dsi_parse_vreg;
 	rc = mdss_dsi_panel_init(dsi_pan_node, ctrl_pdata, cmd_cfg_cont_splash);
 	if (rc) {
 		pr_err("%s: dsi panel init failed\n", __func__);

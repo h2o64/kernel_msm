@@ -318,7 +318,7 @@ static u32 mdss_mdp_perf_calc_pipe_prefill_cmd(struct mdss_mdp_prefill_params
  */
 int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
 	struct mdss_mdp_perf_params *perf, struct mdss_mdp_img_rect *roi,
-	bool apply_fudge, int tune)
+	bool apply_fudge)
 {
 	struct mdss_mdp_mixer *mixer;
 	int fps = DEFAULT_FRAME_RATE;
@@ -345,8 +345,7 @@ int mdss_mdp_perf_calc_pipe(struct mdss_mdp_pipe *pipe,
 			v_total = pinfo->panel_max_vtotal;
 		} else {
 			fps = mdss_panel_get_framerate(pinfo);
-			v_total = mdss_panel_get_vtotal_lcd(pinfo,
-+				tune ? &pinfo->lcdc_tune : &pinfo->lcdc);
+			v_total = mdss_panel_get_vtotal(pinfo);
 		}
 		xres = pinfo->xres;
 		is_fbc = pinfo->fbc.enabled;
@@ -522,7 +521,7 @@ static void mdss_mdp_perf_calc_mixer(struct mdss_mdp_mixer *mixer,
 			continue;
 
 		if (mdss_mdp_perf_calc_pipe(pipe, &tmp, &mixer->roi,
-			apply_fudge, 0))
+			apply_fudge))
 			continue;
 		prefill_bytes += tmp.prefill_bytes;
 		bw_overlap[i] = tmp.bw_overlap;
@@ -1741,11 +1740,13 @@ void mdss_mdp_ctl_restore(struct mdss_mdp_ctl *ctl)
 {
 	u32 temp;
 
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
 	temp = readl_relaxed(ctl->mdata->mdp_base +
 		MDSS_MDP_REG_DISP_INTF_SEL);
 	temp |= (ctl->intf_type << ((ctl->intf_num - MDSS_MDP_INTF0) * 8));
 	writel_relaxed(temp, ctl->mdata->mdp_base +
 		MDSS_MDP_REG_DISP_INTF_SEL);
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
 }
 
 static int mdss_mdp_ctl_start_sub(struct mdss_mdp_ctl *ctl, bool handoff)
