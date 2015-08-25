@@ -43,6 +43,7 @@
 #include <linux/regulator/consumer.h>
 
 #define AKM8963_DEBUG_IF	0
+/* No debug info please */
 #define AKM8963_DEBUG_DATA	0
 
 #define D(x...) printk(KERN_DEBUG "[COMP][AKM8963] " x)
@@ -1556,7 +1557,7 @@ static int akm8963_parse_dt(struct device *dev, struct akm8963_platform_data *pd
 	return 0;
 }
 
-int __devinit akm8963_probe(struct i2c_client *client, const struct i2c_device_id *id)
+int akm8963_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	struct akm8963_platform_data *pdata;
 	int err = 0;
@@ -1567,7 +1568,7 @@ int __devinit akm8963_probe(struct i2c_client *client, const struct i2c_device_i
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		dev_err(&client->dev, "%s: check_functionality failed.",
-				__func__);
+			__func__);
 		err = -ENODEV;
 		goto exit_i2c_fail;
 	}
@@ -1576,7 +1577,7 @@ int __devinit akm8963_probe(struct i2c_client *client, const struct i2c_device_i
 	s_akm = kzalloc(sizeof(struct akm8963_data), GFP_KERNEL);
 	if (!s_akm) {
 		dev_err(&client->dev, "%s: memory allocation failed.",
-				__func__);
+			__func__);
 		err = -ENOMEM;
 		goto exit_kzalloc_fail;
 	}
@@ -1681,14 +1682,10 @@ int __devinit akm8963_probe(struct i2c_client *client, const struct i2c_device_i
 	for (i = 0; i < AKM_NUM_SENSORS; i++)
 		s_akm->delay[i] = -1;
 
-
-#if 0
-/* Removed for code coverage */
 	if (s_akm->irq == 0) {
 		dev_dbg(&client->dev, "%s: IRQ is not set.", __func__);
 		goto exit_irq_fail;
 	} else {
-#endif
 		err = request_threaded_irq(
 				s_akm->irq,
 				NULL,
@@ -1702,9 +1699,7 @@ int __devinit akm8963_probe(struct i2c_client *client, const struct i2c_device_i
 			goto exit_irq_fail;
 		}
 		disable_irq_nosync(s_akm->irq);
-#if 0
 	}
-#endif
 
 	INIT_WORK(&s_akm->work, akm8963_work);
 
@@ -1796,23 +1791,18 @@ static int akm8963_remove(struct i2c_client *client)
 static const struct dev_pm_ops akm8963_pm_ops = {
 };
 
+static struct of_device_id akm8963_match_tbl[] = {
+	{.compatible = "motorola_compass,akm8963" },
+	{},
+};
+MODULE_DEVICE_TABLE(of, akm8963_match_tbl);
+
 static const struct i2c_device_id akm8963_id[] = {
 	{AKM8963_I2C_NAME, 0 },
 	{ }
 };
 
-MODULE_DEVICE_TABLE(i2c, akm8963_id);
-#ifdef CONFIG_OF
-static struct of_device_id akm8963_match_table[] = {
-	{.compatible = "motorola_compass,akm8963" },
-	{},
-};
-#else
-#define akm8963_match_table NULL
-#endif
-
 static struct i2c_driver akm8963_driver = {
-#if 0
 	.probe		= akm8963_probe,
 	.remove		= akm8963_remove,
 	.id_table	= akm8963_id,
@@ -1820,24 +1810,17 @@ static struct i2c_driver akm8963_driver = {
 		.name	= AKM8963_I2C_NAME,
 		.of_match_table = of_match_ptr(akm8963_match_tbl),
 	},
-#endif
 
 	.driver = {
 		.name           = AKM8963_I2C_NAME,
 		.owner          = THIS_MODULE,
-		.of_match_table = akm8963_match_table,
-#ifdef CONFIG_PM
+		.of_match_table = akm8963_match_tbl,
 		.pm             = &akm8963_pm_ops,
-#endif
 	},
-	.probe    = akm8963_probe,
-	.remove   = akm8963_remove,
-	.id_table = akm8963_id,
 
 };
 module_i2c_driver(akm8963_driver);
 
-#if 0
 static int __init akm8963_init(void)
 {
 	printk(KERN_INFO "AKM8963 compass driver: initialize.");
@@ -1852,7 +1835,6 @@ static void __exit akm8963_exit(void)
 
 module_init(akm8963_init);
 module_exit(akm8963_exit);
-#endif
 
 MODULE_AUTHOR("Motorola Mobility, h2o64");
 MODULE_DESCRIPTION("AKM8963 compass driver");
