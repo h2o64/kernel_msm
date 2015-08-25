@@ -769,7 +769,7 @@
 
 	ak8963@0c {
 		compatible = "motorola_compass,akm8963";
-		reg = <0xc>;
+		reg = <0x0c>;
 		interrupt-parent = <&msmgpio>;
 		interrupts = <66 0x2>;
 		vdd-supply = <&pm8226_l19>;
