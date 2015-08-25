@@ -211,23 +211,14 @@ static int32_t msm_cci_data_queue(struct cci_device *cci_dev,
 		pr_err("%s failed line %d\n", __func__, __LINE__);
 		return -EINVAL;
 	}
-
-	reg_addr = i2c_cmd->reg_addr;
+	/* assume total size within the max queue */
 	while (cmd_size) {
-		CDBG("%s cmd_size %d addr 0x%x data 0x%x\n", __func__,
+		CDBG("%s cmd_size %d addr 0x%x data 0x%x", __func__,
 			cmd_size, i2c_cmd->reg_addr, i2c_cmd->reg_data);
 		delay = i2c_cmd->delay;
 		data[i++] = CCI_I2C_WRITE_CMD;
-
-		/* in case of multiple command
-		* MSM_CCI_I2C_WRITE : address is not continuous, so update
-		*			address for a new packet.
-		* MSM_CCI_I2C_WRITE_SEQ : address is continuous, need to keep
-		*			the incremented address for a
-		*			new packet */
-		if (c_ctrl->cmd == MSM_CCI_I2C_WRITE)
+		if (i2c_cmd->reg_addr)
 			reg_addr = i2c_cmd->reg_addr;
-
 		/* either byte or word addr */
 		if (i2c_msg->addr_type == MSM_CAMERA_I2C_BYTE_ADDR)
 			data[i++] = reg_addr;
@@ -251,10 +242,7 @@ static int32_t msm_cci_data_queue(struct cci_device *cci_dev,
 					break;
 			}
 			i2c_cmd++;
-			--cmd_size;
-		} while ((c_ctrl->cmd == MSM_CCI_I2C_WRITE_SEQ) &&
-				(cmd_size > 0) && (i <= 10));
-
+		} while (--cmd_size && !i2c_cmd->reg_addr && (i <= 10));
 		data[0] |= ((i-1) << 4);
 		len = ((i-1)/4) + 1;
 		rc = msm_cci_validate_queue(cci_dev, len, master, queue);
@@ -660,6 +648,69 @@ static struct msm_cam_clk_info cci_clk_info[] = {
 	{"cci_clk", -1},
 };
 
+static void msm_cci_ioreg_enable(struct v4l2_subdev *sd)
+{
+	int rc;
+	uint32_t vddio_voltage;
+	struct cci_device *cci_dev = v4l2_get_subdevdata(sd);
+	struct device *dev;
+
+	if (!cci_dev)
+		return;
+
+	dev = &cci_dev->pdev->dev;
+
+	if (!dev->of_node)
+		return;
+
+	if (!cci_dev->ioreg) {
+		cci_dev->ioreg = regulator_get(dev, "vddio");
+		if (IS_ERR(cci_dev->ioreg)) {
+			pr_warn("%s failed to get regulator\n", __func__);
+			goto fail1;
+		}
+
+		/* set voltage if present in dt */
+		rc = of_property_read_u32(dev->of_node, "vddio-voltage",
+				&vddio_voltage);
+		if (rc >= 0) {
+			rc = regulator_set_voltage(cci_dev->ioreg,
+					vddio_voltage, vddio_voltage);
+			if (rc < 0) {
+				pr_debug("%s failed to set voltage (%d)\n",
+						__func__, rc);
+				goto fail2;
+			}
+		}
+
+		rc = regulator_enable(cci_dev->ioreg);
+		if (rc < 0) {
+			pr_warn("%s failed to enable (%d)\n", __func__, rc);
+			goto fail2;
+		}
+	}
+	return;
+
+fail2:
+	regulator_put(cci_dev->ioreg);
+fail1:
+	cci_dev->ioreg = NULL;
+}
+
+static void msm_cci_ioreg_disable(struct v4l2_subdev *sd)
+{
+	struct cci_device *cci_dev = v4l2_get_subdevdata(sd);
+
+	if (!cci_dev)
+		return;
+
+	if (cci_dev->ioreg) {
+		regulator_disable(cci_dev->ioreg);
+		regulator_put(cci_dev->ioreg);
+		cci_dev->ioreg = NULL;
+	}
+}
+
 static int32_t msm_cci_init(struct v4l2_subdev *sd,
 	struct msm_camera_cci_ctrl *c_ctrl)
 {
@@ -702,6 +753,8 @@ static int32_t msm_cci_init(struct v4l2_subdev *sd,
 		}
 		return 0;
 	}
+
+	msm_cci_ioreg_enable(sd);
 
 	rc = msm_camera_request_gpio_table(cci_dev->cci_gpio_tbl,
 		cci_dev->cci_gpio_tbl_size, 1);
@@ -753,6 +806,7 @@ clk_enable_failed:
 	msm_camera_request_gpio_table(cci_dev->cci_gpio_tbl,
 		cci_dev->cci_gpio_tbl_size, 0);
 request_gpio_failed:
+	msm_cci_ioreg_disable(sd);
 	cci_dev->ref_count--;
 	return rc;
 }
@@ -781,6 +835,8 @@ static int32_t msm_cci_release(struct v4l2_subdev *sd)
 	msm_camera_request_gpio_table(cci_dev->cci_gpio_tbl,
 		cci_dev->cci_gpio_tbl_size, 0);
 
+	msm_cci_ioreg_disable(sd);
+
 	cci_dev->cci_state = CCI_STATE_DISABLED;
 
 	return 0;
@@ -803,7 +859,6 @@ static int32_t msm_cci_config(struct v4l2_subdev *sd,
 		rc = msm_cci_i2c_read_bytes(sd, cci_ctrl);
 		break;
 	case MSM_CCI_I2C_WRITE:
-	case MSM_CCI_I2C_WRITE_SEQ:
 		rc = msm_cci_i2c_write(sd, cci_ctrl);
 		break;
 	case MSM_CCI_GPIO_WRITE:
@@ -1115,7 +1170,7 @@ static int __devinit msm_cci_probe(struct platform_device *pdev)
 {
 	struct cci_device *new_cci_dev;
 	int rc = 0;
-	CDBG("%s: pdev %p device id = %d\n", __func__, pdev, pdev->id);
+	pr_err("%s: pdev %p device id = %d\n", __func__, pdev, pdev->id);
 	new_cci_dev = kzalloc(sizeof(struct cci_device), GFP_KERNEL);
 	if (!new_cci_dev) {
 		CDBG("%s: no enough memory\n", __func__);

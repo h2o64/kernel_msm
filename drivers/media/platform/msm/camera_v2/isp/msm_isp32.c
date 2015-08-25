@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -41,8 +41,6 @@
 	(~(ping_pong >> (idx + VFE32_STATS_PING_PONG_OFFSET)) & 0x1))
 
 #define VFE32_CLK_IDX 0
-#define MSM_ISP32_TOTAL_WM_UB 792
-
 static struct msm_cam_clk_info msm_vfe32_1_clk_info[] = {
 	/*vfe32 clock info for B-family: 8610 */
 	{"vfe_clk_src", 266670000},
@@ -178,15 +176,15 @@ static void msm_vfe32_process_camif_irq(struct vfe_device *vfe_dev,
 	uint32_t irq_status0, uint32_t irq_status1,
 	struct msm_isp_timestamp *ts)
 {
-	uint32_t cnt;
 	if (!(irq_status0 & 0x1F))
 		return;
 
 	if (irq_status0 & BIT(0)) {
 		ISP_DBG("%s: SOF IRQ\n", __func__);
-		cnt = vfe_dev->axi_data.src_info[VFE_PIX_0].raw_stream_count;
-		if (cnt > 0) {
-			msm_isp_sof_notify(vfe_dev, VFE_RAW_0, ts);
+		if (vfe_dev->axi_data.src_info[VFE_PIX_0].raw_stream_count > 0
+			&& vfe_dev->axi_data.src_info[VFE_PIX_0].
+			pix_stream_count == 0) {
+			msm_isp_sof_notify(vfe_dev, VFE_PIX_0, ts);
 			if (vfe_dev->axi_data.stream_update)
 				msm_isp_axi_stream_update(vfe_dev);
 			msm_isp_update_framedrop_reg(vfe_dev);
@@ -255,6 +253,7 @@ static void msm_vfe32_process_violation_status(struct vfe_device *vfe_dev)
 static void msm_vfe32_process_error_status(struct vfe_device *vfe_dev)
 {
 	uint32_t error_status1 = vfe_dev->error_info.error_mask1;
+
 	if (error_status1 & BIT(0))
 		pr_err("%s: camif error status: 0x%x\n",
 			__func__, vfe_dev->error_info.camif_status);
@@ -274,62 +273,34 @@ static void msm_vfe32_process_error_status(struct vfe_device *vfe_dev)
 		pr_err("%s: violation\n", __func__);
 		msm_vfe32_process_violation_status(vfe_dev);
 	}
-	if (error_status1 & BIT(8)) {
-		vfe_dev->stats->imagemaster0_overflow++;
+	if (error_status1 & BIT(8))
 		pr_err("%s: image master 0 bus overflow\n", __func__);
-	}
-	if (error_status1 & BIT(9)) {
-		vfe_dev->stats->imagemaster1_overflow++;
+	if (error_status1 & BIT(9))
 		pr_err("%s: image master 1 bus overflow\n", __func__);
-	}
-	if (error_status1 & BIT(10)) {
-		vfe_dev->stats->imagemaster2_overflow++;
+	if (error_status1 & BIT(10))
 		pr_err("%s: image master 2 bus overflow\n", __func__);
-	}
-	if (error_status1 & BIT(11)) {
-		vfe_dev->stats->imagemaster3_overflow++;
+	if (error_status1 & BIT(11))
 		pr_err("%s: image master 3 bus overflow\n", __func__);
-	}
-	if (error_status1 & BIT(12)) {
-		vfe_dev->stats->imagemaster4_overflow++;
+	if (error_status1 & BIT(12))
 		pr_err("%s: image master 4 bus overflow\n", __func__);
-	}
-	if (error_status1 & BIT(13)) {
-		vfe_dev->stats->imagemaster5_overflow++;
+	if (error_status1 & BIT(13))
 		pr_err("%s: image master 5 bus overflow\n", __func__);
-	}
-	if (error_status1 & BIT(14)) {
-		vfe_dev->stats->imagemaster6_overflow++;
+	if (error_status1 & BIT(14))
 		pr_err("%s: image master 6 bus overflow\n", __func__);
-	}
-	if (error_status1 & BIT(15)) {
-		vfe_dev->stats->bg_overflow++;
+	if (error_status1 & BIT(15))
 		pr_err("%s: status ae/bg bus overflow\n", __func__);
-	}
-	if (error_status1 & BIT(16)) {
-		vfe_dev->stats->bf_overflow++;
+	if (error_status1 & BIT(16))
 		pr_err("%s: status af/bf bus overflow\n", __func__);
-	}
-	if (error_status1 & BIT(17)) {
-		vfe_dev->stats->awb_overflow++;
+	if (error_status1 & BIT(17))
 		pr_err("%s: status awb bus overflow\n", __func__);
-	}
-	if (error_status1 & BIT(18)) {
-		vfe_dev->stats->rs_overflow++;
+	if (error_status1 & BIT(18))
 		pr_err("%s: status rs bus overflow\n", __func__);
-	}
-	if (error_status1 & BIT(19)) {
-		vfe_dev->stats->cs_overflow++;
+	if (error_status1 & BIT(19))
 		pr_err("%s: status cs bus overflow\n", __func__);
-	}
-	if (error_status1 & BIT(20)) {
-		vfe_dev->stats->ihist_overflow++;
+	if (error_status1 & BIT(20))
 		pr_err("%s: status ihist bus overflow\n", __func__);
-	}
-	if (error_status1 & BIT(21)) {
-		vfe_dev->stats->skinbhist_overflow++;
+	if (error_status1 & BIT(21))
 		pr_err("%s: status skin bhist bus overflow\n", __func__);
-	}
 	if (error_status1 & BIT(22))
 		pr_err("%s: axi error\n", __func__);
 }
@@ -403,8 +374,8 @@ static long msm_vfe32_reset_hardware(struct vfe_device *vfe_dev ,
 		reset_type = ISP_RST_HARD;
 	}
 	rst_val = msm_vfe32_reset_values[reset_type];
+	init_completion(&vfe_dev->reset_complete);
 	if (blocking) {
-		init_completion(&vfe_dev->reset_complete);
 		msm_camera_io_w_mb(rst_val, vfe_dev->vfe_base + 0x4);
 		rc = wait_for_completion_timeout(
 		   &vfe_dev->reset_complete, msecs_to_jiffies(50));
@@ -823,43 +794,7 @@ static void msm_vfe32_axi_clear_wm_xbar_reg(
 	msm_camera_io_w(xbar_reg_cfg, vfe_dev->vfe_base + VFE32_XBAR_BASE(wm));
 }
 
-static void msm_vfe32_cfg_axi_ub_equal_default(struct vfe_device *vfe_dev)
-{
-	int i;
-	uint32_t ub_offset = 0;
-	struct msm_vfe_axi_shared_data *axi_data = &vfe_dev->axi_data;
-	uint32_t total_image_size = 0;
-	uint32_t num_used_wms = 0;
-	uint32_t prop_size = 0;
-	uint32_t wm_ub_size;
-	uint64_t delta;
-	for (i = 0; i < axi_data->hw_info->num_wm; i++) {
-		if (axi_data->free_wm[i] > 0) {
-			num_used_wms++;
-			total_image_size += axi_data->wm_image_size[i];
-		}
-	}
-	prop_size = MSM_ISP32_TOTAL_WM_UB -
-		axi_data->hw_info->min_wm_ub * num_used_wms;
-	for (i = 0; i < axi_data->hw_info->num_wm; i++) {
-		if (axi_data->free_wm[i]) {
-			delta =
-				(uint64_t)(axi_data->wm_image_size[i] *
-					prop_size);
-			do_div(delta, total_image_size);
-			wm_ub_size = axi_data->hw_info->min_wm_ub +
-				(uint32_t)delta;
-			msm_camera_io_w(ub_offset << 16 |
-				(wm_ub_size - 1), vfe_dev->vfe_base +
-					VFE32_WM_BASE(i) + 0xC);
-			ub_offset += wm_ub_size;
-		} else
-			msm_camera_io_w(0,
-				vfe_dev->vfe_base + VFE32_WM_BASE(i) + 0xC);
-	}
-}
-
-static void msm_vfe32_cfg_axi_ub_equal_slicing(struct vfe_device *vfe_dev)
+static void msm_vfe32_cfg_axi_ub(struct vfe_device *vfe_dev)
 {
 	int i;
 	uint32_t ub_offset = 0;
@@ -879,16 +814,6 @@ static void msm_vfe32_cfg_axi_ub_equal_slicing(struct vfe_device *vfe_dev)
 			ub_offset += VFE32_EQUAL_SLICE_UB;
 		}
 	}
-}
-
-static void msm_vfe32_cfg_axi_ub(struct vfe_device *vfe_dev)
-{
-	struct msm_vfe_axi_shared_data *axi_data = &vfe_dev->axi_data;
-	axi_data->wm_ub_cfg_policy = MSM_WM_UB_CFG_DEFAULT;
-	if (axi_data->wm_ub_cfg_policy == MSM_WM_UB_EQUAL_SLICING)
-		msm_vfe32_cfg_axi_ub_equal_slicing(vfe_dev);
-	else
-		msm_vfe32_cfg_axi_ub_equal_default(vfe_dev);
 }
 
 static void msm_vfe32_update_ping_pong_addr(struct vfe_device *vfe_dev,
@@ -1181,7 +1106,6 @@ struct msm_vfe_axi_hardware_info msm_vfe32_axi_hw_info = {
 	.num_comp_mask = 3,
 	.num_rdi = 3,
 	.num_rdi_master = 3,
-	.min_wm_ub = 64,
 };
 
 static struct msm_vfe_stats_hardware_info msm_vfe32_stats_hw_info = {
