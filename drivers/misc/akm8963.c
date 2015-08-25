@@ -1550,7 +1550,7 @@ static int akm8963_parse_dt(struct device *dev, struct akm8963_platform_data *pd
 		E("%s: of_get_named_gpio_flags fails: pdata->akm8963,gpio_RST\n", __func__);
 		pdata->gpio_RST = 0;
 	}
-	I("%s: akm8963,gpio_RST = %d", __func__, pdata->gpio_RST);
+	I("%s: gpio_RST = %d", __func__, pdata->gpio_RST);
 
 	pdata->power_LPM = akm8963_sr_lpm;
 
@@ -1819,7 +1819,6 @@ static struct i2c_driver akm8963_driver = {
 	},
 
 };
-module_i2c_driver(akm8963_driver);
 
 static int __init akm8963_init(void)
 {
