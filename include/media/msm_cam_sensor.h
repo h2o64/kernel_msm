@@ -52,6 +52,12 @@
 
 #define MAX_AF_ITERATIONS 3
 #define MAX_NUMBER_OF_STEPS 47
+#define MAX_POWER_CONFIG 12
+
+typedef enum sensor_stats_type {
+	YRGB,
+	YYYY,
+} sensor_stats_type_t;
 
 enum flash_type {
 	LED_FLASH = 1,
@@ -98,8 +104,8 @@ enum msm_sensor_power_seq_gpio_t {
 	SENSOR_GPIO_VANA,
 	SENSOR_GPIO_VDIG,
 	SENSOR_GPIO_VAF,
-	SENSOR_GPIO_PWREN,
-	SENSOR_GPIO_PWREN2,
+	SENSOR_GPIO_FL_EN,
+	SENSOR_GPIO_FL_NOW,
 	SENSOR_GPIO_MAX,
 };
 
@@ -135,37 +141,6 @@ enum sensor_sub_module_t {
 	SUB_MODULE_CSIPHY,
 	SUB_MODULE_CSIPHY_3D,
 	SUB_MODULE_MAX,
-};
-
-struct otp_info_t {
-	uint8_t *otp_info;
-	uint16_t size;
-	uint16_t hw_rev;
-	uint8_t asic_rev;
-	uint16_t sn[4];
-	uint16_t cal_ver;
-	uint8_t otp_read;
-	uint8_t otp_crc_pass;
-};
-
-/* NOTE: Careful when adding params below,
- * certain sensor drivers are doing one
- * big copy for muliple params at one time
- */
-struct mod_info_t {
-	uint8_t SensorSerialNum[13];
-	uint8_t MotPartNum[8];
-	uint8_t LensId[1];
-	uint8_t ManufactureId[2];
-	uint8_t FactoryId[2];
-	uint8_t ManufactureDate[9];
-	uint8_t ManufactureLine[2];
-	uint8_t ModuleSerialNum[4];
-	uint8_t FocuserLiftoff[2];
-	uint8_t FocuserMacro[2];
-	uint8_t FocuserInf[2];
-	uint8_t ShutterCal[16];
-	uint8_t SensorHwRev[5];
 };
 
 enum {
@@ -258,6 +233,8 @@ struct msm_sensor_power_setting {
 struct msm_sensor_power_setting_array {
 	struct msm_sensor_power_setting *power_setting;
 	uint16_t size;
+	struct msm_sensor_power_setting *power_down_setting;
+	uint16_t size_down;
 };
 
 struct msm_sensor_id_info_t {
@@ -265,12 +242,20 @@ struct msm_sensor_id_info_t {
 	uint16_t sensor_id;
 };
 
-struct msm_camera_sensor_slave_info {
-	uint16_t slave_addr;
-	enum msm_camera_i2c_reg_addr_type addr_type;
-	struct msm_sensor_id_info_t sensor_id_info;
-	struct msm_sensor_power_setting_array power_setting_array;
+enum msm_sensor_camera_id_t {
+	CAMERA_0,
+	CAMERA_1,
+	CAMERA_2,
+	CAMERA_3,
+	MAX_CAMERAS,
 };
+
+enum cci_i2c_master_t {
+	MASTER_0,
+	MASTER_1,
+	MASTER_MAX,
+};
+
 
 struct msm_camera_i2c_reg_array {
 	uint16_t reg_addr;
@@ -355,14 +340,20 @@ struct csi_lane_params_t {
 	uint8_t csi_phy_sel;
 };
 
-struct msm_sensor_info_t {
-	char sensor_name[MAX_SENSOR_NAME];
-	int32_t    session_id;
-	int32_t     subdev_id[SUB_MODULE_MAX];
+enum camb_position_t {
+	BACK_CAMERA_B,
+	FRONT_CAMERA_B,
+	INVALID_CAMERA_B,
 };
 
-struct msm_camera_gpio_num_info {
-	int16_t gpio_num[SENSOR_GPIO_MAX];
+struct msm_sensor_info_t {
+	char     sensor_name[MAX_SENSOR_NAME];
+	int32_t  session_id;
+	int32_t  subdev_id[SUB_MODULE_MAX];
+	uint8_t  is_mount_angle_valid;
+	uint32_t sensor_mount_angle;
+	int modes_supported;
+	enum camb_position_t position;
 };
 
 struct camera_vreg_t {
@@ -374,14 +365,10 @@ struct camera_vreg_t {
 	uint32_t delay;
 };
 
-enum camb_position_t {
-	BACK_CAMERA_B,
-	FRONT_CAMERA_B,
-};
-
 enum camerab_mode_t {
 	CAMERA_MODE_2D_B = (1<<0),
-	CAMERA_MODE_3D_B = (1<<1)
+	CAMERA_MODE_3D_B = (1<<1),
+	CAMERA_MODE_INVALID = (1<<2),
 };
 
 struct msm_sensor_init_params {
@@ -393,9 +380,17 @@ struct msm_sensor_init_params {
 	uint32_t            sensor_mount_angle;
 };
 
-struct var_fps_range_t {
-	uint16_t min_fps;
-	uint16_t max_fps;
+struct msm_camera_sensor_slave_info {
+	char sensor_name[32];
+	char eeprom_name[32];
+	char actuator_name[32];
+	enum msm_sensor_camera_id_t camera_id;
+	uint16_t slave_addr;
+	enum msm_camera_i2c_reg_addr_type addr_type;
+	struct msm_sensor_id_info_t sensor_id_info;
+	struct msm_sensor_power_setting_array power_setting_array;
+	uint8_t  is_init_params_valid;
+	struct msm_sensor_init_params sensor_init_params;
 };
 
 struct sensorb_cfg_data {
@@ -404,7 +399,6 @@ struct sensorb_cfg_data {
 		struct msm_sensor_info_t      sensor_info;
 		struct msm_sensor_init_params sensor_init_params;
 		void                         *setting;
-		struct otp_info_t             sensor_otp;
 	} cfg;
 };
 
@@ -429,6 +423,7 @@ enum eeprom_cfg_type_t {
 	CFG_EEPROM_GET_CAL_DATA,
 	CFG_EEPROM_READ_CAL_DATA,
 	CFG_EEPROM_WRITE_DATA,
+	CFG_EEPROM_GET_MM_INFO,
 };
 
 struct eeprom_get_t {
@@ -445,6 +440,12 @@ struct eeprom_write_t {
 	uint32_t num_bytes;
 };
 
+struct eeprom_get_mm_t {
+	uint32_t mm_support;
+	uint32_t mm_compression;
+	uint32_t mm_size;
+};
+
 struct msm_eeprom_cfg_data {
 	enum eeprom_cfg_type_t cfgtype;
 	uint8_t is_supported;
@@ -453,6 +454,7 @@ struct msm_eeprom_cfg_data {
 		struct eeprom_get_t get_data;
 		struct eeprom_read_t read_data;
 		struct eeprom_write_t write_data;
+		struct eeprom_get_mm_t get_mm_data;
 	} cfg;
 };
 
@@ -482,22 +484,16 @@ enum msm_sensor_cfg_type_t {
 	CFG_SET_WHITE_BALANCE,
 	CFG_SET_AUTOFOCUS,
 	CFG_CANCEL_AUTOFOCUS,
-	CFG_SET_GAMMA,
-	CFG_SET_LENS_SHADING,
-	CFG_SET_TARGET_EXPOSURE,
-	CFG_SET_FPS_RANGE,
-	CFG_GET_MODULE_INFO,
-	CFG_GET_LENS_SHADING,
 };
 
 enum msm_actuator_cfg_type_t {
 	CFG_GET_ACTUATOR_INFO,
 	CFG_SET_ACTUATOR_INFO,
 	CFG_SET_DEFAULT_FOCUS,
-	CFG_SET_POSITION,
 	CFG_MOVE_FOCUS,
-	CFG_DIRECT_I2C_WRITE, /*to support non-trivial actuators*/
-	CFG_DIRECT_I2C_READ,
+	CFG_SET_POSITION,
+	CFG_ACTUATOR_POWERDOWN,
+	CFG_ACTUATOR_POWERUP,
 };
 
 enum actuator_type {
@@ -515,9 +511,18 @@ enum msm_actuator_addr_type {
 	MSM_ACTUATOR_WORD_ADDR,
 };
 
+enum msm_actuator_i2c_operation {
+	MSM_ACT_WRITE = 0,
+	MSM_ACT_POLL,
+};
+
 struct reg_settings_t {
 	uint16_t reg_addr;
+	enum msm_actuator_addr_type addr_type;
 	uint16_t reg_data;
+	enum msm_actuator_data_type data_type;
+	enum msm_actuator_i2c_operation i2c_operation;
+	uint32_t delay;
 };
 
 struct region_params_t {
@@ -590,35 +595,16 @@ enum af_camera_name {
 	ACTUATOR_MAIN_CAM_3,
 	ACTUATOR_MAIN_CAM_4,
 	ACTUATOR_MAIN_CAM_5,
-	ACTUATOR_MAIN_CAM_6,
-	ACTUATOR_MAIN_CAM_7,
 	ACTUATOR_WEB_CAM_0,
 	ACTUATOR_WEB_CAM_1,
 	ACTUATOR_WEB_CAM_2,
 };
 
+
 struct msm_actuator_set_position_t {
 	uint16_t number_of_steps;
 	uint16_t pos[MAX_NUMBER_OF_STEPS];
 	uint16_t delay[MAX_NUMBER_OF_STEPS];
-};
-
-struct msm_actuator_i2c {
-	uint16_t addr;
-	uint16_t value;
-	uint32_t wait_time;
-};
-
-#define MSM_ACTUATOR_I2C_MAX_TABLE_SIZE (8)
-struct msm_actuator_i2c_table {
-	struct msm_actuator_i2c data[MSM_ACTUATOR_I2C_MAX_TABLE_SIZE];
-	uint32_t size;
-};
-
-struct msm_actuator_i2c_read_config {
-	uint16_t reg_addr;
-	uint32_t data_size;
-	uint8_t *data;
 };
 
 struct msm_actuator_cfg_data {
@@ -630,8 +616,6 @@ struct msm_actuator_cfg_data {
 		struct msm_actuator_get_info_t get_info;
 		struct msm_actuator_set_position_t setpos;
 		enum af_camera_name cam_name;
-		struct msm_actuator_i2c_table i2c_table;
-		struct msm_actuator_i2c_read_config actuator_i2c_read_config;
 	} cfg;
 };
 
@@ -654,13 +638,26 @@ enum msm_camera_led_config_t {
 	MSM_CAMERA_LED_HIGH,
 	MSM_CAMERA_LED_INIT,
 	MSM_CAMERA_LED_RELEASE,
-	MSM_CAMERA_LED_HIGH_SMODE,
 };
 
 struct msm_camera_led_cfg_t {
 	enum msm_camera_led_config_t cfgtype;
 	uint32_t torch_current;
 	uint32_t flash_current[2];
+};
+
+/* sensor init structures and enums */
+enum msm_sensor_init_cfg_type_t {
+	CFG_SINIT_PROBE,
+	CFG_SINIT_PROBE_DONE,
+	CFG_SINIT_PROBE_WAIT_DONE,
+};
+
+struct sensor_init_cfg_data {
+	enum msm_sensor_init_cfg_type_t cfgtype;
+	union {
+		void *setting;
+	} cfg;
 };
 
 #define VIDIOC_MSM_SENSOR_CFG \
@@ -673,10 +670,10 @@ struct msm_camera_led_cfg_t {
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 3, uint32_t)
 
 #define VIDIOC_MSM_CSIPHY_IO_CFG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 4, struct csid_cfg_data)
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 4, struct csiphy_cfg_data)
 
 #define VIDIOC_MSM_CSID_IO_CFG \
-	_IOWR('V', BASE_VIDIOC_PRIVATE + 5, struct csiphy_cfg_data)
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 5, struct csid_cfg_data)
 
 #define VIDIOC_MSM_ACTUATOR_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 6, struct msm_actuator_cfg_data)
@@ -689,6 +686,9 @@ struct msm_camera_led_cfg_t {
 
 #define VIDIOC_MSM_SENSOR_GET_AF_STATUS \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 9, uint32_t)
+
+#define VIDIOC_MSM_SENSOR_INIT_CFG \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 10, struct sensor_init_cfg_data)
 
 #define MSM_V4L2_PIX_FMT_META v4l2_fourcc('M', 'E', 'T', 'A') /* META */
 

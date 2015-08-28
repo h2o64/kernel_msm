@@ -23,7 +23,7 @@
 #include <linux/of.h>
 #include <linux/miscdevice.h>
 #include <linux/uaccess.h>
-#include <media/msm_cam_sensor.h>
+#include <media/msm_cam_sensor_moto.h>
 
 #define OV660_CHIP_ID_ADDR 0x6080
 #define OV660_CHIP_ID_DATA 0x0660

@@ -722,10 +722,8 @@ int msm_post_event(struct v4l2_event *event, int timeout)
 
 	if (list_empty_careful(&cmd_ack->command_q.list)) {
 		if (!rc) {
-			pr_err("%s: Timed out for cmd = %d\n", __func__,
-				event_data->command);
-			mutex_unlock(&session->lock);
-			return -ETIMEDOUT;
+			pr_err("%s: Timed out\n", __func__);
+			rc = -ETIMEDOUT;
 		} else {
 			pr_err("%s: Error: No timeout but list empty!",
 					__func__);
