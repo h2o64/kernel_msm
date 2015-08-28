@@ -554,7 +554,11 @@ eHalStatus csrUpdateChannelList(tpAniSirGlobal pMac)
     tANI_U32 numChan = 0;
     tANI_U32 bufLen ;
     vos_msg_t msg;
-    tANI_U8 i;
+    tANI_U8 i, j;
+    tANI_U8 num_channel = 0;
+    tANI_U8 channel_state;
+    tANI_U8 cfgnumChannels = 0;
+    tANI_U8 *cfgChannelList = NULL;
 
     limInitOperatingClasses((tHalHandle)pMac);
     numChan = sizeof(pMac->roam.validChannelList);
@@ -576,24 +580,70 @@ eHalStatus csrUpdateChannelList(tpAniSirGlobal pMac)
                 "Failed to allocate memory for tSirUpdateChanList");
         return eHAL_STATUS_FAILED_ALLOC;
     }
+    vos_mem_zero(pChanList, bufLen);
+
+    smsLog(pMac, LOG1, FL("fEnableDFSChnlScan %d"),
+                                  pMac->scan.fEnableDFSChnlScan);
+
+    for (i = 0; i < numChan; i++)
+    {
+        channel_state =
+               vos_nv_getChannelEnabledState(pMac->roam.validChannelList[i]);
+
+        if((pMac->scan.fEnableDFSChnlScan == DFS_CHNL_SCAN_DISABLED)
+           && (channel_state == NV_CHANNEL_DFS))
+        {
+           continue;
+        }
+        pChanList->chanParam[num_channel].chanId =
+                    pMac->roam.validChannelList[i];
+        pChanList->chanParam[num_channel].pwr =
+          cfgGetRegulatoryMaxTransmitPower(pMac,
+                                           pScan->defaultPowerTable[i].chanId);
+        if (channel_state == NV_CHANNEL_DFS)
+            pChanList->chanParam[num_channel].dfsSet = VOS_TRUE;
+        else
+            pChanList->chanParam[num_channel].dfsSet = VOS_FALSE;
+
+        /* When DFS mode is 2, mark static channels as active */
+        if (pMac->scan.fEnableDFSChnlScan == DFS_CHNL_SCAN_ENABLED_ACTIVE)
+        {
+            cfgnumChannels =
+               pMac->roam.neighborRoamInfo.cfgParams.channelInfo.numOfChannels;
+            cfgChannelList =
+                 pMac->roam.neighborRoamInfo.cfgParams.channelInfo.ChannelList;
+
+            if (cfgChannelList)
+            {
+                for(j=0; j< cfgnumChannels; j++)
+                {
+                    if (CSR_IS_CHANNEL_DFS(cfgChannelList[j]) &&
+                         (pMac->roam.validChannelList[i] == cfgChannelList[j]))
+                    {
+                        pChanList->chanParam[num_channel].dfsSet = VOS_FALSE;
+                        VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO,
+                                  "%s Marked DFS ch %d as active\n", __func__,
+                                   cfgChannelList[j]);
+                    }
+                }
+            }
+            else
+                VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO,
+                                    "%s cfgChannelList is NULL \n", __func__);
+         }
+
+        VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO,
+             "%s Supported Channel: %d dfsSet %d pwr: %d \n", __func__,
+              pChanList->chanParam[num_channel].chanId,
+              pChanList->chanParam[num_channel].dfsSet,
+              pChanList->chanParam[num_channel].pwr);
+        num_channel++;
+    }
 
     msg.type = WDA_UPDATE_CHAN_LIST_REQ;
     msg.reserved = 0;
     msg.bodyptr = pChanList;
-    pChanList->numChan = numChan;
-    for (i = 0; i < pChanList->numChan; i++)
-    {
-        pChanList->chanParam[i].chanId = pMac->roam.validChannelList[i];
-        pChanList->chanParam[i].pwr = cfgGetRegulatoryMaxTransmitPower(pMac,
-                pScan->defaultPowerTable[i].chanId);
-        if (vos_nv_getChannelEnabledState(pChanList->chanParam[i].chanId) ==
-            NV_CHANNEL_DFS)
-            pChanList->chanParam[i].dfsSet = VOS_TRUE;
-        else
-            pChanList->chanParam[i].dfsSet = VOS_FALSE;
-        VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO,
-             "%s Supported Channel: %d\n", __func__, pChanList->chanParam[i].chanId);
-    }
+    pChanList->numChan = num_channel;
 
     if(VOS_STATUS_SUCCESS != vos_mq_post_message(VOS_MODULE_ID_WDA, &msg))
     {
@@ -6039,6 +6089,7 @@ static tANI_BOOLEAN csrRoamProcessResults( tpAniSirGlobal pMac, tSmeCmd *pComman
                     csrScanStartIdleScan(pMac);
                     break;
                 case eCsrForcedIbssLeave:
+                     csrIbssAgeBss(pMac);
                      csrRoamCallCallback(pMac, sessionId, NULL, 
                                         pCommand->u.roamCmd.roamId, 
                                         eCSR_ROAM_IBSS_LEAVE,
@@ -6199,8 +6250,8 @@ eHalStatus csrRoamCopyProfile(tpAniSirGlobal pMac, tCsrRoamProfile *pDstProfile,
 #endif /* FEATURE_WLAN_WAPI */
         if(pSrcProfile->nAddIEScanLength)
         {
-            memset(pDstProfile->addIEScan, 0 , SIR_MAC_MAX_IE_LENGTH);
-            if ( SIR_MAC_MAX_IE_LENGTH >=  pSrcProfile->nAddIEScanLength)
+            memset(pDstProfile->addIEScan, 0 , SIR_MAC_MAX_ADD_IE_LENGTH);
+            if ( SIR_MAC_MAX_ADD_IE_LENGTH >=  pSrcProfile->nAddIEScanLength)
             {
                 vos_mem_copy(pDstProfile->addIEScan, pSrcProfile->addIEScan,
                          pSrcProfile->nAddIEScanLength);
@@ -10763,9 +10814,13 @@ eHalStatus csrRoamLostLink( tpAniSirGlobal pMac, tANI_U32 sessionId, tANI_U32 ty
         pDeauthIndMsg = (tSirSmeDeauthInd *)pSirMsg;
         pSession->roamingStatusCode = pDeauthIndMsg->statusCode;
         /* Convert into proper reason code */
-        pSession->joinFailStatusCode.reasonCode =
-                (pDeauthIndMsg->reasonCode == eSIR_BEACON_MISSED) ?
-                0 : pDeauthIndMsg->reasonCode;
+        if ((pDeauthIndMsg->reasonCode == eSIR_BEACON_MISSED) ||
+                (pDeauthIndMsg->reasonCode ==
+                 eSIR_MAC_DISASSOC_DUE_TO_INACTIVITY_REASON))
+            pSession->joinFailStatusCode.reasonCode = 0;
+        else
+            pSession->joinFailStatusCode.reasonCode = pDeauthIndMsg->reasonCode;
+
        /* cfg layer expects 0 as reason code if
           the driver dosent know the reason code
           eSIR_BEACON_MISSED is defined as locally */
@@ -14761,7 +14816,7 @@ static void csrInitSession( tpAniSirGlobal pMac, tANI_U32 sessionId )
 #endif /* FEATURE_WLAN_WAPI */
     if (pSession->nAddIEScanLength)
     {
-       memset(pSession->addIEScan, 0 , SIR_MAC_MAX_IE_LENGTH);
+       memset(pSession->addIEScan, 0 , SIR_MAC_MAX_ADD_IE_LENGTH);
     }
     pSession->nAddIEScanLength = 0;
 
@@ -16129,6 +16184,7 @@ eHalStatus csrRoamOffloadScan(tpAniSirGlobal pMac, tANI_U8 command, tANI_U8 reas
    if(command == ROAM_SCAN_OFFLOAD_STOP)
    {
       pRequestBuf->RoamScanOffloadEnabled = 0;
+      pRequestBuf->StartScanReason = reason;
       /*For a STOP Command, there is no need to
        * go through filling up all the below parameters
        * since they are not required for the STOP command*/
@@ -17103,6 +17159,13 @@ void csrReleaseCommand(tpAniSirGlobal pMac, tSmeCmd *pCommand)
 eHalStatus csrQueueSmeCommand( tpAniSirGlobal pMac, tSmeCmd *pCommand, tANI_BOOLEAN fHighPriority )
 {
     eHalStatus status;
+
+    if (!SME_IS_START(pMac))
+    {
+        smsLog( pMac, LOGE, FL("Sme in stop state"));
+        return eHAL_STATUS_FAILURE;
+    }
+
     if( (eSmeCommandScan == pCommand->command) && pMac->scan.fDropScanCmd )
     {
         smsLog(pMac, LOGW, FL(" drop scan (scan reason %d) command"),
