@@ -206,7 +206,7 @@ int mdss_mdp_splash_cleanup(struct msm_fb_data_type *mfd,
 			mdss_mdp_splash_unmap_splash_mem(mfd);
 			memblock_free(mdp5_data->splash_mem_addr,
 					mdp5_data->splash_mem_size);
-			mdss_free_bootmem(mdp5_data->splash_mem_addr,
+			free_bootmem_late(mdp5_data->splash_mem_addr,
 					mdp5_data->splash_mem_size);
 		}
 		goto end;

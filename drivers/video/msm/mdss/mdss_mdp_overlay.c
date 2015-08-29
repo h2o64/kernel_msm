@@ -3145,6 +3145,7 @@ static int __mdss_mdp_ctl_handoff(struct mdss_mdp_ctl *ctl,
 	}
 exit:
 	return rc;
+}
 
 static void mdss_mdp5_dump_ctl(void *data)
 {
