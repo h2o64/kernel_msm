@@ -1106,10 +1106,6 @@ static int mdss_dsi_event_handler(struct mdss_panel_data *pdata,
 		}
 		break;
 	case MDSS_EVENT_CONT_SPLASH_BEGIN:
-		if (ctrl_pdata->off_cmds.link_state == DSI_HS_MODE) {
-			/* Panel is Enabled in Bootloader */
-			rc = mdss_dsi_blank(pdata);
-		}
 		break;
 	case MDSS_EVENT_ENABLE_PARTIAL_UPDATE:
 		rc = mdss_dsi_ctl_partial_update(pdata);
