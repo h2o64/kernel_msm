@@ -19,7 +19,6 @@
                 mmi,panel_name = "mipi_mot_video_cmi_hd_450";
                 mmi,panel_ver_min = <0x00000000 0x000186c2>;
                 mmi,panel_ver_max = <0xffffffff 0xffffffff>;
-                qcom,panel-esd-power-mode-chk = <0x94>;
 
                 qcom,mdss-dsi-panel-name = "mipi_mot_video_cmi_hd_450 v2";
                 qcom,mdss-dsi-panel-controller = <&mdss_dsi0>;
@@ -76,8 +75,13 @@
 
 		qcom,mdss-dsi-on-command-state = "dsi_lp_mode";
 		qcom,mdss-dsi-off-command-state = "dsi_hs_mode";
-		qcom,esd-check-enabled;
+
 		qcom,mdss-dsi-panel-status-check-mode = "moto_check";
+		qcom,esd-check-enabled;
+		qcom,mdss-dsi-esd-det-mode = <1>;
+		qcom,panel-esd-power-mode-chk = <0x94>; /* TODO: Commonize with qcom,mdss-dsi-panel-status-value */
+		qcom,mdss-dsi-panel-status-value = "0x94"; /* Power is in good state at 0x94 or 0x9c */
+
 		qcom,dynamic-mode-switch-enabled;
 		qcom,video-to-cmd-mode-switch-commands = [15 01 00 00 14 00 02 C2 0B
 					15 01 00 00 00 00 02 C2 08];
@@ -104,9 +108,6 @@
 		qcom,mdss-dsi-pan-enable-dynamic-fps;
 		qcom,mdss-dsi-pan-fps-update = "dfps_immediate_porch_mode";
 		qcom,mdss-dsi-min-refresh-rate = <45>;
-
-		qcom,mdss-dsi-esd-det-mode = <1>;
-		qcom,mdss-dsi-panel-status-value = "0x94"; /* Power is in good state at 0x94 or 0x9c */
 
 		qcom,panel-en-reset-sequence = <1 11>;
 		qcom,panel-dis-reset-sequence = <0 3>;
