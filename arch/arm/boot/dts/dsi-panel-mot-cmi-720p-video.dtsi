@@ -79,8 +79,10 @@
 		qcom,mdss-dsi-panel-status-check-mode = "moto_check";
 		qcom,esd-check-enabled;
 		qcom,mdss-dsi-esd-det-mode = <1>;
-		qcom,panel-esd-power-mode-chk = <0x94>; /* TODO: Commonize with qcom,mdss-dsi-panel-status-value */
-		qcom,mdss-dsi-panel-status-value = "0x94"; /* Power is in good state at 0x94 or 0x9c */
+		qcom,panel-esd-power-mode-chk = <0x9c>; /* TODO: Commonize with qcom,mdss-dsi-panel-status-value */
+		qcom,mdss-dsi-panel-status-value = "0x9c"; /* Power is in good state at 0x94 or 0x9c */
+		qcom,mdss-dsi-te-check-enable;
+		qcom,mdss-dsi-te-using-te-pin;
 
 		qcom,dynamic-mode-switch-enabled;
 		qcom,video-to-cmd-mode-switch-commands = [15 01 00 00 14 00 02 C2 0B
@@ -92,11 +94,6 @@
 		qcom,mdss-dsi-bllp-power-mode;
 		qcom,mdss-dsi-lane-0-state;
 		qcom,mdss-dsi-lane-1-state;
-		qcom,mdss-dsi-te-pin-select = <1>;
-		qcom,mdss-dsi-wr-mem-start = <0x2c>;
-		qcom,mdss-dsi-te-dcs-command = <1>;
-		qcom,mdss-dsi-te-check-enable;
-		qcom,mdss-dsi-te-using-te-pin;
 		qcom,mdss-dsi-panel-timings = [c3 3e 34 00 55 4f 33 40 29 03 04 00];
 		qcom,mdss-dsi-t-clk-post = <0x1e>;
 		qcom,mdss-dsi-t-clk-pre = <0x32>;
