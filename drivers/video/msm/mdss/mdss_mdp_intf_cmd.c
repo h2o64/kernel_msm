@@ -793,7 +793,7 @@ void mdss_mdp_cmd_dump_ctx(struct mdss_mdp_ctl *ctl)
 
 	MDSS_TIMEOUT_LOG("pp_num=%u\n", ctx->pp_num);
 	MDSS_TIMEOUT_LOG("panel_on=%d\n", ctx->panel_on);
-	MDSS_TIMEOUT_LOG("koff_cnt=%d\n", ctx->koff_cnt);
+	MDSS_TIMEOUT_LOG("koff_cnt=%d\n", atomic_read(&ctx->koff_cnt));
 	MDSS_TIMEOUT_LOG("clk_enabled=%d\n", ctx->clk_enabled);
 	MDSS_TIMEOUT_LOG("vsync_enabled=%d\n", ctx->vsync_enabled);
 	MDSS_TIMEOUT_LOG("rdptr_enabled=%d\n", ctx->rdptr_enabled);
