@@ -1642,6 +1642,10 @@ int dsi_panel_device_register(struct device_node *pan_node,
 		ctrl_pdata->check_status = mdss_dsi_reg_status_check;
 	else if (ctrl_pdata->status_mode == ESD_BTA)
 		ctrl_pdata->check_status = mdss_dsi_bta_status_check;
+	else if (ctrl_pdata->status_mode == ESD_MOTO) {
+		ctrl_pdata->check_status = mdss_dsi_moto_status_check;
+		pr_info("%s: Using Moto Status check for ESD check\n", __func__);
+		}
 
 	if (ctrl_pdata->status_mode == ESD_MAX) {
 		pr_err("%s: Using default BTA for ESD check\n", __func__);

@@ -743,6 +743,72 @@ int mdss_dsi_bta_status_check(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 	return ret;
 }
 
+/**
+ * mdss_dsi_moto_status_check() - Check dsi panel status through Moto ESD detection method
+ * @ctrl_pdata: pointer to the dsi controller structure
+ *
+ * This function can be used to check status of the panel using Moto ESD detection method
+ * for the panel.
+ *
+ * Return: positive value if the panel is in good state, negative value or
+ * zero otherwise.
+ */
+int mdss_dsi_moto_status_check(struct mdss_dsi_ctrl_pdata *ctrl)
+{
+	static bool initialized;
+	int ret = 0;
+	u8 pwr_mode = 0;
+	struct mdss_panel_esd_pdata *esd_data = &ctrl->panel_esd_data;
+
+	if (!ctrl->panel_data.panel_info.panel_power_on) {
+		ret = 1;
+		goto end;
+	}
+
+	/* Set up TE pin monitor */
+	if (!initialized && esd_data->esd_detect_mode == ESD_TE_DET) {
+		pr_debug("%s: init ESD TE monitor.\n", __func__);
+		init_completion(&esd_data->te_detected);
+		esd_data->te_irq = gpio_to_irq(ctrl->disp_te_gpio);
+		if (request_irq(esd_data->te_irq,
+			mdss_panel_esd_te_irq_handler,
+			IRQF_TRIGGER_RISING, "mdss_panel_esd_te", ctrl)) {
+			pr_err("%s: unable to request IRQ %d\n",
+						__func__, ctrl->disp_te_gpio);
+			goto end;
+		}
+		initialized = true;
+	}
+
+	/* Check panel power mode */
+	pr_debug("%s: Checking power mode\n", __func__);
+	mdss_dsi_get_pwr_mode(&ctrl->panel_data, &pwr_mode, DSI_MODE_BIT_HS);
+	if ((pwr_mode & esd_data->esd_pwr_mode_chk) !=
+						esd_data->esd_pwr_mode_chk) {
+		pr_warn("%s: Detected pwr_mode = 0x%x expected mask = 0x%x\n",
+				__func__, pwr_mode, esd_data->esd_pwr_mode_chk);
+		goto end;
+	}
+
+	/* Check panel TE pin status */
+	if (esd_data->esd_detect_mode == ESD_TE_DET &&
+		(esd_data->esd_pwr_mode_chk & 0x4)) {
+		pr_debug("%s: Checking TE status.\n", __func__);
+		INIT_COMPLETION(ctrl->panel_esd_data.te_detected);
+		enable_irq(ctrl->panel_esd_data.te_irq);
+		if (wait_for_completion_timeout(
+			&ctrl->panel_esd_data.te_detected,
+			msecs_to_jiffies(68)) == 0) {
+			pr_warn("%s: No TE sig for %d usec.\n",  __func__,
+							68);
+			goto end;
+		}
+	}
+	ret = 1;
+end:
+	return ret;
+}
+
 int mdss_dsi_cmd_reg_tx(u32 data,
 			unsigned char *ctrl_base)
 {

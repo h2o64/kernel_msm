@@ -88,6 +88,7 @@ enum dsi_panel_bl_ctrl {
 enum dsi_panel_status_mode {
 	ESD_BTA,
 	ESD_REG,
+	ESD_MOTO,
 	ESD_MAX,
 };
 
@@ -218,6 +219,17 @@ struct dsi_kickoff_action {
 	void *data;
 };
 
+enum {
+	ESD_TE_DET = 1,
+};
+
+struct mdss_panel_esd_pdata {
+	int esd_pwr_mode_chk;
+	int esd_detect_mode;
+	int te_irq;
+	struct completion te_detected;
+};
+
 struct mdss_panel_config {
 	bool esd_enable;
 	bool esd_disable_bl;
@@ -265,6 +277,7 @@ struct mdss_dsi_ctrl_pdata {
 	struct mdss_panel_data panel_data;
 	struct dss_module_power panel_vregs;
 	struct mdss_panel_config panel_config;
+	struct mdss_panel_esd_pdata panel_esd_data;
 	unsigned char *ctrl_base;
 	struct dss_io_data ctrl_io;
 	struct dss_io_data mmss_misc_io;
@@ -388,6 +401,9 @@ void mdss_dsi_clk_deinit(struct mdss_dsi_ctrl_pdata *ctrl_pdata);
 int mdss_dsi_enable_bus_clocks(struct mdss_dsi_ctrl_pdata *ctrl_pdata);
 void mdss_dsi_disable_bus_clocks(struct mdss_dsi_ctrl_pdata *ctrl_pdata);
 int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable);
+int mdss_dsi_get_pwr_mode(struct mdss_panel_data *pdata, u8 *pwr_mode,
+								int read_mode);
+irqreturn_t mdss_panel_esd_te_irq_handler(int irq, void *ctrl_ptr);
 void mdss_dsi_phy_disable(struct mdss_dsi_ctrl_pdata *ctrl);
 void mdss_dsi_phy_init(struct mdss_panel_data *pdata);
 void mdss_dsi_phy_sw_reset(unsigned char *ctrl_base);
@@ -402,6 +418,7 @@ int mdss_dsi_cmdlist_commit(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp);
 void mdss_dsi_cmdlist_kickoff(int intf);
 int mdss_dsi_bta_status_check(struct mdss_dsi_ctrl_pdata *ctrl);
 int mdss_dsi_reg_status_check(struct mdss_dsi_ctrl_pdata *ctrl);
+int mdss_dsi_moto_status_check(struct mdss_dsi_ctrl_pdata *ctrl);
 bool __mdss_dsi_clk_enabled(struct mdss_dsi_ctrl_pdata *ctrl, u8 clk_type);
 
 int mdss_dsi_panel_init(struct device_node *node,
