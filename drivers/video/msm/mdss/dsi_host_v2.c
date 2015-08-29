@@ -1628,6 +1628,10 @@ void msm_dsi_ctrl_init(struct mdss_dsi_ctrl_pdata *ctrl)
 		ctrl->check_status = msm_dsi_reg_status_check;
 	else if (ctrl->status_mode == ESD_BTA)
 		ctrl->check_status = msm_dsi_bta_status_check;
+	else if (ctrl->status_mode == ESD_MOTO) {
+		ctrl->check_status = msm_dsi_moto_status_check;
+		pr_info("%s: Using Moto Status check for ESD check\n", __func__);
+	}
 
 	if (ctrl->status_mode == ESD_MAX) {
 		pr_err("%s: Using default BTA for ESD check\n", __func__);

@@ -294,7 +294,7 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 	return rc;
 }
 
-static int mdss_dsi_get_pwr_mode(struct mdss_panel_data *pdata, u8 *pwr_mode,
+int mdss_dsi_get_pwr_mode(struct mdss_panel_data *pdata, u8 *pwr_mode,
 								int read_mode)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl;
@@ -322,10 +322,13 @@ int mdss_panel_parse_panel_config_dt(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 	u32 panel_ver;
 
 	np = of_find_node_by_path("/chosen");
-	ctrl_pdata->panel_config.esd_disable_bl =
-			of_property_read_bool(np, "mmi,esd");
-	if (ctrl_pdata->panel_config.esd_disable_bl)
+
+	ctrl_pdata->panel_config.esd_enable =
+					!of_property_read_bool(np, "qcom,esd-check-enabled");
+	if (!ctrl_pdata->panel_config.esd_enable)
 		pr_warn("%s: ESD detection is disabled by UTAGS\n", __func__);
+	else
+		pr_warn("%s: ESD detection is enabled by UTAGS\n", __func__);
 
 	if (of_property_read_bool(np, "mmi,bare_board") == true)
 		ctrl_pdata->panel_config.bare_board = true;
@@ -578,6 +581,18 @@ static int mdss_dsi_panel_regulator_on(struct mdss_panel_data *pdata,
 error:
 	return ret;
 }
+
+irqreturn_t mdss_panel_esd_te_irq_handler(int irq, void *ctrl_ptr)
+{
+	struct mdss_dsi_ctrl_pdata *ctrl =
+				(struct mdss_dsi_ctrl_pdata *)ctrl_ptr;
+	pr_debug("%s: is called\n", __func__);
+
+	complete(&ctrl->panel_esd_data.te_detected);
+	disable_irq_nosync(ctrl->panel_esd_data.te_irq);
+	return IRQ_HANDLED;
+}
+
 static int mdss_dsi_panel_cont_splash_on(struct mdss_panel_data *pdata)
 {
 	mdss_dsi_panel_regulator_on(pdata, 1);
@@ -1595,6 +1610,8 @@ static int mdss_panel_parse_dt(struct device_node *np,
 			ctrl_pdata->status_mode = ESD_BTA;
 		else if (!strcmp(data, "reg_read"))
 			ctrl_pdata->status_mode = ESD_REG;
+		else if (!strcmp(data, "moto_check"))
+			ctrl_pdata->status_mode = ESD_MOTO;
 	}
 
 	rc = mdss_dsi_parse_panel_features(np, ctrl_pdata);
@@ -1602,6 +1619,13 @@ static int mdss_panel_parse_dt(struct device_node *np,
 		pr_err("%s: failed to parse panel features\n", __func__);
 		goto error;
 	}
+
+	of_property_read_u32(np,
+		"qcom,panel-esd-power-mode-chk",
+		&ctrl_pdata->panel_esd_data.esd_pwr_mode_chk);
+
+	of_property_read_u32(np, "qcom,mdss-dsi-esd-det-mode",
+		&ctrl_pdata->panel_esd_data.esd_detect_mode);
 
 	mdss_dsi_parse_dfps_config(np, ctrl_pdata);
 
