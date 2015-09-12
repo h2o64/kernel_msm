@@ -359,4 +359,8 @@
 		qcom,master-stats-version = <2>;
 		qcom,master-offset = <2560>;
 	};
+
+	qcom,bam_dmux@fc834000 {
+		qcom,fast-shutdown;
+	};
 };
