@@ -123,7 +123,6 @@ static inline void hash_del_rcu(struct hlist_node *node)
 	for ((bkt) = 0, obj = NULL; obj == NULL && (bkt) < HASH_SIZE(name);\
 			(bkt)++)\
 		hlist_for_each_entry(obj, tmp, &name[bkt], member)
-
 /**
  * hash_for_each_rcu - iterate over a rcu enabled hashtable
  * @name: hashtable to iterate
@@ -136,7 +135,6 @@ static inline void hash_del_rcu(struct hlist_node *node)
 	for ((bkt) = 0, obj = NULL; obj == NULL && (bkt) < HASH_SIZE(name);\
 			(bkt)++)\
 		hlist_for_each_entry_rcu(obj, tmp, &name[bkt], member)
-
 /**
  * hash_for_each_safe - iterate over a hashtable safe against removal of
  * hash entry
