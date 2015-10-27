@@ -201,8 +201,8 @@ static void cpufreq_interactive_timer_start(int cpu)
 static unsigned int freq_to_above_hispeed_delay(unsigned int freq)
 {
 	int i;
-	unsigned int ret;
-	unsigned long flags;
+	unsigned int ret = 0;
+	unsigned long flags = 0;
 
 	spin_lock_irqsave(&above_hispeed_delay_lock, flags);
 
