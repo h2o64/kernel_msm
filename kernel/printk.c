@@ -41,7 +41,6 @@
 #include <linux/cpu.h>
 #include <linux/notifier.h>
 #include <linux/rculist.h>
-#include <linux/apanic_mmc.h>
 #include <linux/poll.h>
 
 #include <asm/uaccess.h>
