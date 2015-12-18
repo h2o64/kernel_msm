@@ -26,6 +26,14 @@ struct panel_id {
 #define DEFAULT_FRAME_RATE	60
 #define MDSS_DSI_RST_SEQ_LEN	10
 
+enum cabc_mode {
+	CABC_UI_MODE = 0,
+	CABC_ST_MODE,
+	CABC_MV_MODE,
+	CABC_OFF_MODE,
+	CABC_MODE_MAX_NUM
+};
+
 /* panel type list */
 #define NO_PANEL		0xffff	/* No Panel */
 #define MDDI_PANEL		1	/* MDDI */
@@ -69,6 +77,13 @@ enum {
 	MODE_GPIO_NOT_VALID = 0,
 	MODE_GPIO_HIGH,
 	MODE_GPIO_LOW,
+};
+
+enum {
+	BL_PWM,
+	BL_WLED,
+	BL_DCS_CMD,
+	UNKNOWN_CTRL,
 };
 
 #define MDSS_MAX_PANEL_LEN      256
@@ -128,6 +143,7 @@ struct mdss_panel_recovery {
  * @MDSS_EVENT_PANEL_CLK_CTRL:	panel clock control
 				 - 0 clock disable
 				 - 1 clock enable
+ * @MDSS_EVENT_ENABLE_PARTIAL_UPDATE: Event to update ROI of the panel.
  * @MDSS_EVENT_DSI_CMDLIST_KOFF: acquire dsi_mdp_busy lock before kickoff.
  * @MDSS_EVENT_DSI_ULPS_CTRL:	Event to configure Ultra Lower Power Saving
  *				mode for the DSI data and clock lanes. The
@@ -138,7 +154,7 @@ struct mdss_panel_recovery {
  *				based on the dsi mode passed as argument.
  *				- 0: update to video mode
  *				- 1: update to command mode
- * @MDSS_EVENT_ENABLE_HBM:	Enable "High Brightness Mode" feature on panel
+ * @MDSS_EVENT_SET_CABC: Set CABC mode, for Motorola "Dynamic CABC" feature.
  */
 enum mdss_intf_events {
 	MDSS_EVENT_RESET = 1,
@@ -160,8 +176,9 @@ enum mdss_intf_events {
 	MDSS_EVENT_ENABLE_PARTIAL_UPDATE,
 	MDSS_EVENT_DSI_ULPS_CTRL,
 	MDSS_EVENT_REGISTER_RECOVERY_HANDLER,
-	MDSS_EVENT_DSI_DYNAMIC_SWITCH,
 	MDSS_EVENT_ENABLE_HBM,
+	MDSS_EVENT_DSI_DYNAMIC_SWITCH,
+	MDSS_EVENT_SET_CABC,
 };
 
 struct lcd_panel_info {
@@ -336,7 +353,6 @@ struct mdss_panel_info {
 	bool esd_check_enabled;
 	char dfps_update;
 	int new_fps;
-	bool cont_splash_esd_rdy;
 	int panel_max_fps;
 	int panel_max_vtotal;
 	u32 xstart_pix_align;
@@ -354,6 +370,10 @@ struct mdss_panel_info {
 	u32 panel_power_on;
 	bool hbm_feature_enabled;
 	bool hbm_state;
+	bool dynamic_cabc_enabled;
+	enum cabc_mode cabc_mode;
+	char supplier[8];
+	u32 bl_shutdown_delay;
 
 	uint32_t panel_dead;
 	bool dynamic_switch_pending;
@@ -389,7 +409,6 @@ struct mdss_panel_data {
 	int (*event_handler) (struct mdss_panel_data *pdata, int e, void *arg);
 
 	struct mdss_panel_data *next;
-	struct mdss_panel_data *prev;
 };
 
 /**
@@ -511,4 +530,19 @@ int mdss_panel_get_boot_cfg(void);
  * returns true if mdss is ready, else returns false.
  */
 bool mdss_is_ready(void);
+
+/**
+ * mdss_panel_map_cabc_name() - get panel CABC mode name
+ *
+ * returns name if mapping succeeds, else returns NULL.
+ */
+static const char *cabc_mode_names[CABC_MODE_MAX_NUM] = {
+	"UI", "ST", "MV", "OFF"
+};
+static inline const char *mdss_panel_map_cabc_name(int mode)
+{
+	if (mode >= CABC_UI_MODE && mode < CABC_MODE_MAX_NUM)
+		return cabc_mode_names[mode];
+	return NULL;
+}
 #endif /* MDSS_PANEL_H */

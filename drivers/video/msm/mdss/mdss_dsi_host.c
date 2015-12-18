@@ -45,7 +45,6 @@
 
 #define PWR_MODE_DISON 0x4
 
-
 struct mdss_dsi_ctrl_pdata *ctrl_list[DSI_CTRL_MAX];
 
 struct mdss_hw mdss_dsi0_hw = {
@@ -413,21 +412,6 @@ void mdss_dsi_set_tx_power_mode(int mode, struct mdss_panel_data *pdata)
 	MIPI_OUTP((ctrl_pdata->ctrl_base) + 0x3c, data);
 }
 
-int mdss_dsi_get_tx_power_mode(struct mdss_panel_data *pdata)
-{
-	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
-	u32 data;
-
-	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
-								panel_data);
-
-	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 1);
-	data = MIPI_INP((ctrl_pdata->ctrl_base) + 0x3c);
-	mdss_dsi_clk_ctrl(ctrl_pdata, DSI_ALL_CLKS, 0);
-
-	return !!(data & BIT(26));
-}
-
 void mdss_dsi_sw_reset(struct mdss_panel_data *pdata)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
@@ -662,26 +646,25 @@ static int mdss_dsi_read_status(struct mdss_dsi_ctrl_pdata *ctrl)
 #ifdef MDSS_PANEL_ESD_SELF_TRIGGER
 static char disp_off[2] = {0x28, 0x0};  /* DTYPE_DCS_WRITE1 */
 static struct dsi_cmd_desc dispoff_cmd = {
-       {DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(disp_off)}, disp_off
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(disp_off)}, disp_off
 };
 
 static void mdss_dsi_panel_dispoff_dcs(struct mdss_dsi_ctrl_pdata *ctrl)
 {
-       struct dcs_cmd_req cmdreq;
+	struct dcs_cmd_req cmdreq;
 
-       pr_debug("%s+:\n", __func__);
+	pr_debug("%s+:\n", __func__);
 
-       memset(&cmdreq, 0, sizeof(cmdreq));
-       cmdreq.cmds = &dispoff_cmd;
-       cmdreq.cmds_cnt = 1;
-       cmdreq.flags = CMD_REQ_COMMIT | CMD_CLK_CTRL;
-       cmdreq.rlen = 0;
-       cmdreq.cb = NULL;
+	memset(&cmdreq, 0, sizeof(cmdreq));
+	cmdreq.cmds = &dispoff_cmd;
+	cmdreq.cmds_cnt = 1;
+	cmdreq.flags = CMD_REQ_COMMIT | CMD_CLK_CTRL;
+	cmdreq.rlen = 0;
+	cmdreq.cb = NULL;
 
-       mdss_dsi_cmdlist_put(ctrl, &cmdreq);
+	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
 }
 #endif
-
 
 /**
  * mdss_dsi_reg_status_check() - Check dsi panel status through reg read
@@ -797,11 +780,11 @@ int mdss_dsi_moto_status_check(struct mdss_dsi_ctrl_pdata *ctrl)
 	static bool initialized, dropbox_sent;
 	int ret = 0;
 	u8 pwr_mode = 0;
+	struct mdss_panel_esd_pdata *esd_data = &ctrl->panel_esd_data;
 #ifdef MDSS_PANEL_ESD_SELF_TRIGGER
 	static int esd_count;
 	static int esd_trigger_cnt;
 #endif
-	struct mdss_panel_esd_pdata *esd_data = &ctrl->panel_esd_data;
 
 	if (!ctrl->panel_data.panel_info.panel_power_on) {
 		ret = 1;
@@ -825,22 +808,23 @@ int mdss_dsi_moto_status_check(struct mdss_dsi_ctrl_pdata *ctrl)
 
 	/* Check panel power mode */
 	pr_debug("%s: Checking power mode\n", __func__);
-	mdss_dsi_get_pwr_mode(&ctrl->panel_data, &pwr_mode, DSI_MODE_BIT_HS);
+	mdss_dsi_get_pwr_mode(&ctrl->panel_data, &pwr_mode);
 #ifdef MDSS_PANEL_ESD_SELF_TRIGGER
-       if (esd_count++ > MDSS_PANEL_ESD_TE_TRIGGER)
-               esd_count = 0;
-       if (esd_count == MDSS_PANEL_ESD_CNT_MAX) {
-               pr_info("%s(%d): Start ESD power mode test\n", __func__,
-                               esd_trigger_cnt++);
-               pwr_mode = 0x00;
-       }
+	if (esd_count++ > MDSS_PANEL_ESD_TE_TRIGGER)
+		esd_count = 0;
+	if (esd_count == MDSS_PANEL_ESD_CNT_MAX) {
+		pr_info("%s(%d): Start ESD power mode test\n", __func__,
+				esd_trigger_cnt++);
+		pwr_mode = 0x00;
+	}
 #endif
-	if ((pwr_mode & esd_data->esd_pwr_mode_chk) != esd_data->esd_pwr_mode_chk) {
-		pr_warn("%s: Detected pwr_mode = 0x%x expected mask = 0x%x\n",
-				__func__, pwr_mode, esd_data->esd_pwr_mode_chk);
+	if ((pwr_mode & esd_data->esd_pwr_mode_chk) !=
+					esd_data->esd_pwr_mode_chk) {
+		pr_warn("%s: ESD detected pwr_mode =0x%x expected = 0x%x\n",
+			__func__, pwr_mode, esd_data->esd_pwr_mode_chk);
 		if (!dropbox_sent) {
-			dropbox_queue_event_text(DROPBOX_DISPLAY_ISSUE,ESD_DROPBOX_MSG, 
-						strlen(ESD_DROPBOX_MSG));
+			dropbox_queue_event_text(DROPBOX_DISPLAY_ISSUE,
+				ESD_DROPBOX_MSG, strlen(ESD_DROPBOX_MSG));
 			dropbox_sent = true;
 		}
 		goto end;
@@ -848,14 +832,14 @@ int mdss_dsi_moto_status_check(struct mdss_dsi_ctrl_pdata *ctrl)
 
 	/* Check panel TE pin status */
 	if (esd_data->esd_detect_mode == ESD_TE_DET &&
-               (esd_data->esd_pwr_mode_chk & PWR_MODE_DISON)) {
+		(esd_data->esd_pwr_mode_chk & PWR_MODE_DISON)) {
 #ifdef MDSS_PANEL_ESD_SELF_TRIGGER
-               if (esd_count == MDSS_PANEL_ESD_TE_TRIGGER) {
-                       pr_warn("%s(%d): Start ESD TE test.\n", __func__,
-                               esd_trigger_cnt);
-                       mdss_dsi_panel_dispoff_dcs(ctrl);
-                       esd_count = 0;
-               }
+		if (esd_count == MDSS_PANEL_ESD_TE_TRIGGER) {
+			pr_warn("%s(%d): Start ESD TE test.\n", __func__,
+				esd_trigger_cnt);
+			mdss_dsi_panel_dispoff_dcs(ctrl);
+			esd_count = 0;
+		}
 #endif
 		pr_debug("%s: Checking TE status.\n", __func__);
 		INIT_COMPLETION(ctrl->panel_esd_data.te_detected);
@@ -864,14 +848,13 @@ int mdss_dsi_moto_status_check(struct mdss_dsi_ctrl_pdata *ctrl)
 			&ctrl->panel_esd_data.te_detected,
 			msecs_to_jiffies(TE_MONITOR_TO)) == 0) {
 			pr_warn("%s: No TE sig for %d usec.\n",  __func__,
-                                                       TE_MONITOR_TO);
-                       if (!dropbox_sent) {
-                               dropbox_queue_event_text(DROPBOX_DISPLAY_ISSUE,
-                                       ESD_TE_DROPBOX_MSG,
-                                      strlen(ESD_TE_DROPBOX_MSG));
-                               dropbox_sent = true;
-                       }
-
+							TE_MONITOR_TO);
+			if (!dropbox_sent) {
+				dropbox_queue_event_text(DROPBOX_DISPLAY_ISSUE,
+					ESD_TE_DROPBOX_MSG,
+					strlen(ESD_TE_DROPBOX_MSG));
+				dropbox_sent = true;
+			}
 			goto end;
 		}
 	}
@@ -1514,10 +1497,9 @@ int mdss_dsi_cmdlist_commit(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp)
 	if (req->flags & CMD_REQ_HS_MODE)
 		mdss_dsi_set_tx_power_mode(0, &ctrl->panel_data);
 
-	if (req->flags & CMD_REQ_RX) {
-		mdss_dsi_cmdlist_rx(ctrl, req);
-		ret = ctrl->rx_buf.len;
-	} else
+	if (req->flags & CMD_REQ_RX)
+		ret = mdss_dsi_cmdlist_rx(ctrl, req);
+	else
 		ret = mdss_dsi_cmdlist_tx(ctrl, req);
 
 	if (req->flags & CMD_REQ_HS_MODE)
@@ -1610,7 +1592,7 @@ static int dsi_event_thread(void *data)
 	spin_lock_init(&ev->event_lock);
 
 	while (1) {
-		wait_event(ev->event_q, (ev->event_pndx != ev->event_gndx));
+		wait_event_interruptible(ev->event_q, (ev->event_pndx != ev->event_gndx));
 		spin_lock_irqsave(&ev->event_lock, flag);
 		evq = &ev->todo_list[ev->event_gndx++];
 		todo = evq->todo;

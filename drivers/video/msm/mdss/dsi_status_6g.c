@@ -59,16 +59,13 @@ void mdss_check_dsi_ctrl_status(struct work_struct *work, uint32_t interval)
 		return;
 	}
 
-	if (!pdata->panel_info.cont_splash_esd_rdy) {
-		pr_warn("%s: Splash not complete, reschedule check status\n",
-			__func__);
-		schedule_delayed_work(&pstatus_data->check_status,
-				msecs_to_jiffies(interval));
-		return;
-	}
-
 	mdp5_data = mfd_to_mdp5_data(pstatus_data->mfd);
 	ctl = mfd_to_ctl(pstatus_data->mfd);
+
+	if (!ctl) {
+		pr_warn("%s: mdss_mdp_ctl data not available\n", __func__);
+		return;
+	}
 
 	if (!ctl) {
 		pr_err("%s: Display is off\n", __func__);
@@ -82,7 +79,6 @@ void mdss_check_dsi_ctrl_status(struct work_struct *work, uint32_t interval)
 		return;
 	}
 
-	mutex_lock(&ctl->offlock);
 	mutex_lock(&ctrl_pdata->mutex);
 
 	/*
@@ -92,16 +88,13 @@ void mdss_check_dsi_ctrl_status(struct work_struct *work, uint32_t interval)
 	 * lock to fix issues so that ESD thread would not block other
 	 * overlay operations. Need refine this lock for command mode
 	 */
-	if (mipi->mode == DSI_CMD_MODE &&
-		ctrl_pdata->status_mode == ESD_BTA)
+	if (mipi->mode == DSI_CMD_MODE)
 		mutex_lock(&mdp5_data->ov_lock);
 
 	if (pstatus_data->mfd->shutdown_pending) {
-		if (mipi->mode == DSI_CMD_MODE &&
-			ctrl_pdata->status_mode == ESD_BTA)
+		if (mipi->mode == DSI_CMD_MODE)
 			mutex_unlock(&mdp5_data->ov_lock);
 		mutex_unlock(&ctrl_pdata->mutex);
-		mutex_unlock(&ctl->offlock);
 		pr_err("%s: DSI turning off, avoiding panel status check\n",
 							__func__);
 		return;
@@ -117,26 +110,18 @@ void mdss_check_dsi_ctrl_status(struct work_struct *work, uint32_t interval)
 	 * display reset not to be proper. Hence, wait for DMA_P done
 	 * for command mode panels before triggering BTA.
 	 */
-	if (ctrl_pdata->status_mode == ESD_BTA) {
-		if (ctl->wait_pingpong)
-			ctl->wait_pingpong(ctl, NULL);
-		pr_debug("%s: DSI ctrl wait for ping pong done\n", __func__);
-	}
+	if (ctl->wait_pingpong)
+		ctl->wait_pingpong(ctl, NULL);
 
-	if (!pstatus_data->mfd->panel_power_on) {
-		pr_err("%s: panel off\n", __func__);
-		return;
-	}
+	pr_debug("%s: DSI ctrl wait for ping pong done\n", __func__);
 
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
 	ret = ctrl_pdata->check_status(ctrl_pdata);
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
 
-	if (mipi->mode == DSI_CMD_MODE &&
-		ctrl_pdata->status_mode == ESD_BTA)
+	if (mipi->mode == DSI_CMD_MODE)
 		mutex_unlock(&mdp5_data->ov_lock);
 	mutex_unlock(&ctrl_pdata->mutex);
-	mutex_unlock(&ctl->offlock);
 
 	if ((pstatus_data->mfd->panel_power_on)) {
 		if (ret > 0) {

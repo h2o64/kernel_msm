@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1052,7 +1052,6 @@ static struct mdss_mdp_ctl *mdss_mdp_ctl_alloc(struct mdss_data_type *mdata,
 			ctl->ref_cnt++;
 			ctl->mdata = mdata;
 			mutex_init(&ctl->lock);
-			mutex_init(&ctl->offlock);
 			spin_lock_init(&ctl->spin_lock);
 			BLOCKING_INIT_NOTIFIER_HEAD(&ctl->notifier_head);
 			pr_debug("alloc ctl_num=%d\n", ctl->num);
@@ -1742,13 +1741,11 @@ void mdss_mdp_ctl_restore(struct mdss_mdp_ctl *ctl)
 {
 	u32 temp;
 
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
 	temp = readl_relaxed(ctl->mdata->mdp_base +
 		MDSS_MDP_REG_DISP_INTF_SEL);
 	temp |= (ctl->intf_type << ((ctl->intf_num - MDSS_MDP_INTF0) * 8));
 	writel_relaxed(temp, ctl->mdata->mdp_base +
 		MDSS_MDP_REG_DISP_INTF_SEL);
-	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
 }
 
 static int mdss_mdp_ctl_start_sub(struct mdss_mdp_ctl *ctl, bool handoff)
@@ -2230,7 +2227,6 @@ int mdss_mdp_ctl_addr_setup(struct mdss_data_type *mdata,
 {
 	struct mdss_mdp_ctl *head;
 	struct mutex *shared_lock = NULL;
-	struct mutex *wb_lock = NULL;
 	u32 i;
 	u32 size = len;
 
@@ -2244,14 +2240,6 @@ int mdss_mdp_ctl_addr_setup(struct mdss_data_type *mdata,
 			return -ENOMEM;
 		}
 		mutex_init(shared_lock);
-		wb_lock = devm_kzalloc(&mdata->pdev->dev,
-					   sizeof(struct mutex),
-					   GFP_KERNEL);
-		if (!wb_lock) {
-			pr_err("unable to allocate mem for mutex\n");
-			return -ENOMEM;
-		}
-		mutex_init(wb_lock);
 	}
 
 	head = devm_kzalloc(&mdata->pdev->dev, sizeof(struct mdss_mdp_ctl) *
@@ -2271,7 +2259,6 @@ int mdss_mdp_ctl_addr_setup(struct mdss_data_type *mdata,
 
 	if (!mdata->has_wfd_blk) {
 		head[len - 1].shared_lock = shared_lock;
-		head[len - 1].wb_lock = wb_lock;
 		/*
 		 * Allocate a virtual ctl to be able to perform simultaneous
 		 * line mode and block mode operations on the same

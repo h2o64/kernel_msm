@@ -23,6 +23,7 @@
 
 #include "mdss_fb.h"
 #include "mdss_mdp.h"
+#include "mdss_debug.h"
 #include "splash.h"
 #include "mdss_mdp_splash_logo.h"
 
@@ -199,24 +200,11 @@ int mdss_mdp_splash_cleanup(struct msm_fb_data_type *mfd,
 	if (!mfd || !mdp5_data)
 		return -EINVAL;
 
-	if (!mfd->panel_info->cont_splash_enabled ||
-		(mfd->splash_info.iommu_dynamic_attached && !use_borderfill)) {
-		if (mfd->splash_info.iommu_dynamic_attached &&
-			use_borderfill) {
-			mdss_mdp_splash_unmap_splash_mem(mfd);
-			memblock_free(mdp5_data->splash_mem_addr,
-					mdp5_data->splash_mem_size);
-			free_bootmem_late(mdp5_data->splash_mem_addr,
-					mdp5_data->splash_mem_size);
-		}
+	if (mfd->splash_info.iommu_dynamic_attached ||
+			!mfd->panel_info->cont_splash_enabled)
 		goto end;
-	}
 
-	/* 1-to-1 mapping */
-	mdss_mdp_splash_iommu_attach(mfd);
-
-	if (use_borderfill && mdp5_data->handoff &&
-		!mfd->splash_info.iommu_dynamic_attached) {
+	if (use_borderfill && mdp5_data->handoff) {
 		/*
 		 * Set up border-fill on the handed off pipes.
 		 * This is needed to ensure that there are no memory
@@ -252,8 +240,7 @@ int mdss_mdp_splash_cleanup(struct msm_fb_data_type *mfd,
 
 	mdss_mdp_ctl_splash_finish(ctl, mdp5_data->handoff);
 
-	if (mdp5_data->splash_mem_addr &&
-		!mfd->splash_info.iommu_dynamic_attached) {
+	if (mdp5_data->splash_mem_addr) {
 		/* Give back the reserved memory to the system */
 		memblock_free(mdp5_data->splash_mem_addr,
 					mdp5_data->splash_mem_size);

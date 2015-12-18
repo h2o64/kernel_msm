@@ -317,13 +317,11 @@ static int mdss_mdp_video_stop(struct mdss_mdp_ctl *ctl)
 		return -ENODEV;
 	}
 	MDSS_XLOG(ctl->num, ctl->vsync_cnt);
-	mutex_lock(&ctl->offlock);
 	if (ctx->timegen_en) {
 		rc = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_BLANK, NULL);
 		if (rc == -EBUSY) {
 			pr_debug("intf #%d busy don't turn off\n",
 				 ctl->intf_num);
-			mutex_unlock(&ctl->offlock);
 			return rc;
 		}
 		WARN(rc, "intf %d blank error (%d)\n", ctl->intf_num, rc);
@@ -363,7 +361,6 @@ static int mdss_mdp_video_stop(struct mdss_mdp_ctl *ctl)
 	mdss_mdp_set_intr_callback(MDSS_MDP_IRQ_INTF_UNDER_RUN, ctl->intf_num,
 				   NULL, NULL);
 
-	mutex_unlock(&ctl->offlock);
 	mdss_mdp_ctl_reset(ctl);
 	ctx->ref_cnt--;
 	ctl->priv_data = NULL;
@@ -743,7 +740,6 @@ static int mdss_mdp_video_display(struct mdss_mdp_ctl *ctl, void *arg)
 		if ((pdata->panel_info.cont_splash_enabled &&
 			!ctl->mfd->splash_info.splash_logo_enabled)
 			|| (ctl->mfd->splash_info.splash_logo_enabled
-			&& ctl->mfd->splash_info.splash_thread
 			&& !is_mdss_iommu_attached())) {
 			rc = wait_for_completion_timeout(&ctx->vsync_comp,
 					usecs_to_jiffies(VSYNC_TIMEOUT_US));
@@ -813,9 +809,6 @@ int mdss_mdp_video_reconfigure_splash_done(struct mdss_mdp_ctl *ctl,
 
 		/* wait for 1 VSYNC for the pipe to be unstaged */
 		msleep(20);
-
-		ret = mdss_mdp_ctl_intf_event(ctl,
-			MDSS_EVENT_CONT_SPLASH_FINISH, NULL);
 	}
 	ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_PANEL_CONT_SPLASH_FINISH,
 				NULL);

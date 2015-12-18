@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -198,7 +198,6 @@ struct mdss_mdp_ctl {
 	struct mutex lock;
 	struct mutex offlock;
 	struct mutex *shared_lock;
-	struct mutex *wb_lock;
 	spinlock_t spin_lock;
 
 	struct mdss_panel_data *panel_data;
@@ -727,7 +726,6 @@ void mdss_mdp_crop_rect(struct mdss_mdp_img_rect *src_rect,
 
 int mdss_mdp_wb_kickoff(struct msm_fb_data_type *mfd);
 int mdss_mdp_wb_ioctl_handler(struct msm_fb_data_type *mfd, u32 cmd, void *arg);
-int mdss_dsi_ioctl_handler(struct mdss_panel_data *pdata, u32 cmd, void *arg);
 
 int mdss_mdp_get_ctl_mixers(u32 fb_num, u32 *mixer_id);
 u32 mdss_mdp_fb_stride(u32 fb_index, u32 xres, int bpp);
@@ -765,4 +763,5 @@ int mdss_mdp_pipe_program_pixel_extn(struct mdss_mdp_pipe *pipe);
 				(mfd->mdp.private1))->wb)
 
 int  mdss_mdp_ctl_reset(struct mdss_mdp_ctl *ctl);
+void mdss_mdp_footswitch_ctrl(struct mdss_data_type *mdata, int on);
 #endif /* MDSS_MDP_H */

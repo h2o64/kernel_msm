@@ -54,6 +54,7 @@
 
 #include "mdss_fb.h"
 #include "mdss_mdp_splash_logo.h"
+#include "mdss_mdp.h"
 
 #ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
 #define MDSS_FB_NUM 3
@@ -65,7 +66,7 @@
 static struct fb_info *fbi_list[MAX_FBI_LIST];
 static int fbi_list_index;
 
-struct sys_panelinfo panelinfo = {NULL, NULL};
+struct sys_panelinfo panelinfo = {NULL, NULL, NULL};
 
 static u32 mdss_fb_pseudo_palette[16] = {
 	0x00000000, 0xffffffff, 0xffffffff, 0xffffffff,
@@ -304,6 +305,9 @@ static void mdss_fb_parse_dt(struct msm_fb_data_type *mfd)
 	u32 panel_xres;
 	struct platform_device *pdev = mfd->pdev;
 
+	mfd->splash_logo_enabled = of_property_read_bool(pdev->dev.of_node,
+				"qcom,mdss-fb-splash-logo-enabled");
+
 	of_property_read_u32_array(pdev->dev.of_node,
 		"qcom,mdss-fb-split", data, 2);
 
@@ -324,6 +328,69 @@ static void mdss_fb_parse_dt(struct msm_fb_data_type *mfd)
 	}
 	pr_info("split framebuffer left=%d right=%d\n",
 		mfd->split_fb_left, mfd->split_fb_right);
+}
+
+static int pcc_r = 32768, pcc_g = 32768, pcc_b = 32768;
+static ssize_t mdss_get_rgb(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d %d %d\n", pcc_r, pcc_g, pcc_b);
+}
+
+/**
+ * simple color temperature interface using polynomial color correction
+ *
+ * input values are r/g/b adjustments from 0-32768 representing 0 -> 1
+ *
+ * example adjustment @ 3500K:
+ * 1.0000 / 0.5515 / 0.2520 = 32768 / 25828 / 17347
+ *
+ * reference chart:
+ * http://www.vendian.org/mncharity/dir3/blackbody/UnstableURLs/bbr_color.html
+ */
+static ssize_t mdss_set_rgb(struct device *dev,
+							struct device_attribute *attr,
+							const char *buf, size_t count)
+{
+	uint32_t r = 0, g = 0, b = 0;
+	struct mdp_pcc_cfg_data pcc_cfg;
+	u32 copyback = 0;
+
+    if (count > 19)
+		return -EINVAL;
+
+	sscanf(buf, "%d %d %d", &r, &g, &b);
+
+	if (r < 0 || r > 32768)
+		return -EINVAL;
+	if (g < 0 || g > 32768)
+		return -EINVAL;
+	if (b < 0 || b > 32768)
+		return -EINVAL;
+
+	/* Disable log spamming on kmsg */
+	//pr_info("%s: r=%d g=%d b=%d", __func__, r, g, b);
+
+	memset(&pcc_cfg, 0, sizeof(struct mdp_pcc_cfg_data));
+
+	pcc_cfg.block = MDP_LOGICAL_BLOCK_DISP_0;
+	if (r == 32768 && g == 32768 && b == 32768)
+		pcc_cfg.ops = MDP_PP_OPS_DISABLE;
+	else
+		pcc_cfg.ops = MDP_PP_OPS_ENABLE;
+	pcc_cfg.ops |= MDP_PP_OPS_WRITE;
+	pcc_cfg.r.r = r;
+	pcc_cfg.g.g = g;
+	pcc_cfg.b.b = b;
+
+	if (mdss_mdp_pcc_config(&pcc_cfg, &copyback) == 0) {
+		pcc_r = r;
+		pcc_g = g;
+		pcc_b = b;
+		return count;
+	}
+
+	return -EINVAL;
 }
 
 static ssize_t mdss_fb_get_split(struct device *dev,
@@ -520,6 +587,7 @@ static DEVICE_ATTR(idle_time, S_IRUGO | S_IWUSR | S_IWGRP,
 	mdss_fb_get_idle_time, mdss_fb_set_idle_time);
 static DEVICE_ATTR(idle_notify, S_IRUGO, mdss_fb_get_idle_notify, NULL);
 static DEVICE_ATTR(msm_fb_panel_info, S_IRUGO, mdss_fb_get_panel_info, NULL);
+static DEVICE_ATTR(rgb, S_IRUGO | S_IWUSR | S_IWGRP, mdss_get_rgb, mdss_set_rgb);
 
 static struct attribute *mdss_fb_attrs[] = {
 	&dev_attr_msm_fb_type.attr,
@@ -528,6 +596,7 @@ static struct attribute *mdss_fb_attrs[] = {
 	&dev_attr_idle_time.attr,
 	&dev_attr_idle_notify.attr,
 	&dev_attr_msm_fb_panel_info.attr,
+	&dev_attr_rgb.attr,
 	NULL,
 };
 
@@ -545,6 +614,12 @@ static ssize_t panel_ver_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
 	return snprintf(buf, PAGE_SIZE, "0x%016llx\n", *panelinfo.panel_ver);
+}
+
+static ssize_t panel_supplier_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%s\n", panelinfo.panel_supplier);
 }
 
 static ssize_t panel_man_id_show(struct device *dev,
@@ -573,6 +648,8 @@ static DEVICE_ATTR(panel_name, S_IRUGO,
 					panel_name_show, NULL);
 static DEVICE_ATTR(panel_ver, S_IRUGO,
 					panel_ver_show, NULL);
+static DEVICE_ATTR(panel_supplier, S_IRUGO,
+					panel_supplier_show, NULL);
 static DEVICE_ATTR(man_id, S_IRUGO,
 					panel_man_id_show, NULL);
 static DEVICE_ATTR(controller_ver, S_IRUGO,
@@ -582,6 +659,7 @@ static DEVICE_ATTR(controller_drv_ver, S_IRUGO,
 static struct attribute *panel_id_attrs[] = {
 	&dev_attr_panel_name.attr,
 	&dev_attr_panel_ver.attr,
+	&dev_attr_panel_supplier.attr,
 	&dev_attr_man_id.attr,
 	&dev_attr_controller_ver.attr,
 	&dev_attr_controller_drv_ver.attr,
@@ -1031,31 +1109,30 @@ void mdss_fb_update_backlight(struct msm_fb_data_type *mfd)
 	u32 temp;
 	bool bl_notify = false;
 
-	if (mfd->unset_bl_level) {
-		mutex_lock(&mfd->bl_lock);
-		if (!mfd->bl_updated) {
-			pdata = dev_get_platdata(&mfd->pdev->dev);
-			if ((pdata) && (pdata->set_backlight)) {
-				mfd->bl_level = mfd->unset_bl_level;
-				temp = mfd->bl_level;
-				if (mfd->mdp.ad_calc_bl)
-					(*mfd->mdp.ad_calc_bl)(mfd, temp, &temp,
-								&bl_notify);
-				if (bl_notify)
-					mdss_fb_bl_update_notify(mfd);
-				pdata->set_backlight(pdata, temp);
-				mfd->bl_level_scaled = mfd->unset_bl_level;
-				mfd->bl_updated = 1;
-			}
+	mutex_lock(&mfd->bl_lock);
+	if (mfd->unset_bl_level && !mfd->bl_updated) {
+		pdata = dev_get_platdata(&mfd->pdev->dev);
+		if ((pdata) && (pdata->set_backlight)) {
+			mfd->bl_level = mfd->unset_bl_level;
+			temp = mfd->bl_level;
+			if (mfd->mdp.ad_calc_bl)
+				(*mfd->mdp.ad_calc_bl)(mfd, temp, &temp,
+						&bl_notify);
+			if (bl_notify)
+				mdss_fb_bl_update_notify(mfd);
+			pdata->set_backlight(pdata, temp);
+			mfd->bl_level_scaled = mfd->unset_bl_level;
+			mfd->bl_updated = 1;
 		}
-		mutex_unlock(&mfd->bl_lock);
 	}
+	mutex_unlock(&mfd->bl_lock);
 }
 
 static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 			     int op_enable)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
+	struct mdss_panel_data *pdata;
 	int ret = 0;
 
 	if (!op_enable)
@@ -1064,13 +1141,25 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	if (mfd->dcm_state == DCM_ENTER)
 		return -EPERM;
 
+	pdata = dev_get_platdata(&mfd->pdev->dev);
+
 	switch (blank_mode) {
 	case FB_BLANK_UNBLANK:
 		if (!mfd->panel_power_on && mfd->mdp.on_fnc) {
+			int panel_dead = mfd->panel_info->panel_dead;
 			ret = mfd->mdp.on_fnc(mfd);
 			if (ret == 0) {
 				mfd->panel_power_on = true;
-				mfd->panel_info->panel_dead = false;
+				if (panel_dead &&
+				mfd->panel_info->bklt_ctrl == BL_DCS_CMD &&
+				pdata) {
+					mutex_lock(&mfd->bl_lock);
+					pdata->set_backlight(pdata,
+							mfd->bl_level);
+					mutex_unlock(&mfd->bl_lock);
+				}
+				if (panel_dead)
+					mfd->panel_info->panel_dead = false;
 			}
 			mutex_lock(&mfd->update.lock);
 			mfd->update.type = NOTIFY_TYPE_UPDATE;
@@ -1116,6 +1205,13 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 			mfd->bl_updated = 0;
 			mutex_unlock(&mfd->bl_lock);
 
+			if (mfd->shutdown_pending &&
+			    mfd->panel_info->bl_shutdown_delay)
+				usleep_range(mfd->panel_info->bl_shutdown_delay
+				       * 1000,
+				       mfd->panel_info->bl_shutdown_delay
+				       * 1000);
+
 			ret = mfd->mdp.off_fnc(mfd);
 			if (ret)
 				mfd->panel_power_on = curr_pwr_state;
@@ -1136,6 +1232,8 @@ static int mdss_fb_blank(int blank_mode, struct fb_info *info)
 {
 	struct mdss_panel_data *pdata;
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
+	int panel_dead = mfd->panel_info->panel_dead;
+	int ret;
 
 	mdss_fb_pan_idle(mfd);
 	if (mfd->op_enable == 0) {
@@ -1157,7 +1255,16 @@ static int mdss_fb_blank(int blank_mode, struct fb_info *info)
 		pdata->panel_info.is_lpm_mode = false;
 	}
 
-	return mdss_fb_blank_sub(blank_mode, info, mfd->op_enable);
+	ret = mdss_fb_blank_sub(blank_mode, info, mfd->op_enable);
+
+	if (blank_mode == FB_BLANK_UNBLANK && !panel_dead &&
+		mfd->panel_info->panel_dead) {
+		pr_err("%s: Panel is dead, attempt recovery\n", __func__);
+		mdss_fb_blank_sub(FB_BLANK_NORMAL, info, 1);
+		mdss_fb_blank_sub(FB_BLANK_UNBLANK, info, 1);
+	}
+
+	return ret;
 }
 
 static inline int mdss_fb_create_ion_client(struct msm_fb_data_type *mfd)
@@ -2341,7 +2448,7 @@ static int __mdss_fb_display_thread(void *data)
 				mfd->index);
 
 	while (1) {
-		wait_event(mfd->commit_wait_q,
+		wait_event_interruptible(mfd->commit_wait_q,
 				(atomic_read(&mfd->commits_pending) ||
 				 kthread_should_stop()));
 
@@ -2974,8 +3081,6 @@ static int mdss_fb_register_extra_panel(struct platform_device *pdev,
 	}
 
 	fb_pdata->next = pdata;
-	if (pdata)
-		pdata->prev = fb_pdata;
 
 	return 0;
 }

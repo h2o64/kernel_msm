@@ -506,8 +506,6 @@ int mdss_mdp_cmd_reconfigure_splash_done(struct mdss_mdp_ctl *ctl, bool handoff)
 		pr_err("%s: fail to send event PANEL_CONT_SPLASH_FINISH. "
 			"ret = %d\n", __func__, ret);
 
-	mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_PANEL_CLK_CTRL, (void *)0);
-
 	return ret;
 }
 
@@ -768,13 +766,11 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl)
 	memset(ctx, 0, sizeof(*ctx));
 	ctl->priv_data = NULL;
 
-	mutex_lock(&ctl->offlock);
 	ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_BLANK, NULL);
 	WARN(ret, "intf %d unblank error (%d)\n", ctl->intf_num, ret);
 
 	ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_PANEL_OFF, NULL);
 	WARN(ret, "intf %d unblank error (%d)\n", ctl->intf_num, ret);
-	mutex_unlock(&ctl->offlock);
 
 	ctl->stop_fnc = NULL;
 	ctl->display_fnc = NULL;
