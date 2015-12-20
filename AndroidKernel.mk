@@ -31,7 +31,14 @@ ifeq ($(TARGET_KERNEL_SELECT_OF_DT),true)
 endif
 
 ifeq "$(KERNEL_USE_OF)" "y"
-DTS_FILES = $(wildcard $(TOP)/kernel/arch/arm/boot/dts/$(DTS_NAME)*.dts)
+ifeq ($(CONFIG_MMI_TITAN_DTB),y)
+DTS_FILES = $(wildcard $(TOP)/kernel/arch/arm/boot/dts/msm8226-titan*.dts)
+DTS_FILES += $(wildcard $(TOP)/kernel/arch/arm/boot/dts/msm8926-thea*.dts)
+else ifeq ($(CONFIG_MMI_PEREGRINE_DTB),y)
+DTS_FILES = $(wildcard $(TOP)/kernel/arch/arm/boot/dts/msm8926-peregrine*.dts)
+else
+DTS_FILES = $(wildcard $(TOP)/kernel/arch/arm/boot/dts/msm8226-falcon*.dts)
+endif
 DTS_FILE = $(lastword $(subst /, ,$(1)))
 DTB_FILE = $(addprefix $(KERNEL_OUT)/arch/arm/boot/,$(patsubst %.dts,%.dtb,$(call DTS_FILE,$(1))))
 ZIMG_FILE = $(addprefix $(KERNEL_OUT)/arch/arm/boot/,$(patsubst %.dts,%-zImage,$(call DTS_FILE,$(1))))
