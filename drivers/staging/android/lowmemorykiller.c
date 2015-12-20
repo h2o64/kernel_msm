@@ -44,14 +44,13 @@
 #include <linux/delay.h>
 #include <linux/swap.h>
 #include <linux/fs.h>
+#include <trace/events/memkill.h>
 #include <linux/cpuset.h>
 #include <linux/show_mem_notifier.h>
 #include <linux/vmpressure.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/almk.h>
-
-#include <trace/events/memkill.h>
 
 #ifdef CONFIG_HIGHMEM
 #define _ZONE ZONE_HIGHMEM
@@ -618,10 +617,6 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 					"%d:%d:%lu:%lu ", i, j,
 					zall[i][j].free,
 					zall[i][j].file);
-
-		trace_lmk_kill(selected->pid, selected->comm,
-				selected_oom_score_adj, selected_tasksize,
-				min_score_adj, sc->gfp_mask, zinfo);
 		send_sig(SIGKILL, selected, 0);
 		set_tsk_thread_flag(selected, TIF_MEMDIE);
 		rem -= selected_tasksize;
