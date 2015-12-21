@@ -1200,7 +1200,7 @@ static void __cpuinit setup_cpu_timer(int cpu)
 {
 	struct delayed_work *work = &per_cpu(vmstat_work, cpu);
 
-	INIT_DEFERRABLE_WORK(work, vmstat_update);
+	INIT_DELAYED_WORK_DEFERRABLE(work, vmstat_update);
 	start_cpu_timer(cpu);
 }
 
@@ -1277,7 +1277,7 @@ static int __init setup_vmstat(void)
 
 	register_cpu_notifier(&vmstat_notifier);
 
-	INIT_DEFERRABLE_WORK(&vmstat_monitor_work,
+	INIT_DELAYED_WORK_DEFERRABLE(&vmstat_monitor_work,
 				vmstat_update_monitor);
 	queue_delayed_work(system_unbound_wq,
 				&vmstat_monitor_work,
