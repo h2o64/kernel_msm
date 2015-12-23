@@ -97,7 +97,7 @@ config RTC_INTF_DEV
 config RTC_INTF_ALARM
 	bool "Android alarm driver"
 	depends on RTC_CLASS
-	default y
+	default n
 	help
 	  Provides non-wakeup and rtc backed wakeup alarms based on rtc or
 	  elapsed realtime, and a non-wakeup alarm on the monotonic clock.
@@ -107,7 +107,7 @@ config RTC_INTF_ALARM
 config RTC_INTF_ALARM_DEV
 	bool "Android alarm device"
 	depends on RTC_INTF_ALARM
-	default y
+	default n
 	help
 	  Exports the alarm interface to user-space.
 
