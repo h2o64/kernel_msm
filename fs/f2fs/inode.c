@@ -52,7 +52,9 @@ static void __get_inode_rdev(struct inode *inode, struct f2fs_inode *ri)
 
 static bool __written_first_block(struct f2fs_inode *ri)
 {
-	if (ri->i_addr[0] != NEW_ADDR && ri->i_addr[0] != NULL_ADDR)
+	block_t addr = le32_to_cpu(ri->i_addr[0]);
+
+	if (addr != NEW_ADDR && addr != NULL_ADDR)
 		return true;
 	return false;
 }
@@ -136,9 +138,7 @@ static int do_read_inode(struct inode *inode)
 	fi->i_pino = le32_to_cpu(ri->i_pino);
 	fi->i_dir_level = ri->i_dir_level;
 
-	write_lock(&fi->ext_lock);
-	get_extent_info(&fi->ext, ri->i_ext);
-	write_unlock(&fi->ext_lock);
+	f2fs_init_extent_cache(inode, &ri->i_ext);
 
 	get_inline_info(fi, ri);
 
@@ -197,7 +197,10 @@ make_now:
 		inode->i_mapping->a_ops = &f2fs_dblock_aops;
 		mapping_set_gfp_mask(inode->i_mapping, GFP_F2FS_HIGH_ZERO);
 	} else if (S_ISLNK(inode->i_mode)) {
-		inode->i_op = &f2fs_symlink_inode_operations;
+		if (f2fs_encrypted_inode(inode))
+			inode->i_op = &f2fs_encrypted_symlink_inode_operations;
+		else
+			inode->i_op = &f2fs_symlink_inode_operations;
 		inode->i_mapping->a_ops = &f2fs_dblock_aops;
 	} else if (S_ISCHR(inode->i_mode) || S_ISBLK(inode->i_mode) ||
 			S_ISFIFO(inode->i_mode) || S_ISSOCK(inode->i_mode)) {
@@ -342,7 +345,12 @@ void f2fs_evict_inode(struct inode *inode)
 no_delete:
 	stat_dec_inline_dir(inode);
 	stat_dec_inline_inode(inode);
+
+	/* update extent info in inode */
+	if (inode->i_nlink)
+		f2fs_preserve_extent_tree(inode);
 	f2fs_destroy_extent_tree(inode);
+
 	invalidate_mapping_pages(NODE_MAPPING(sbi), inode->i_ino, inode->i_ino);
 	if (xnid)
 		invalidate_mapping_pages(NODE_MAPPING(sbi), xnid, xnid);
@@ -351,6 +359,10 @@ no_delete:
 	if (is_inode_flag_set(F2FS_I(inode), FI_UPDATE_WRITE))
 		add_dirty_inode(sbi, inode->i_ino, UPDATE_INO);
 out_clear:
+#ifdef CONFIG_F2FS_FS_ENCRYPTION
+	if (F2FS_I(inode)->i_crypt_info)
+		f2fs_free_encryption_info(inode, F2FS_I(inode)->i_crypt_info);
+#endif
 	end_writeback(inode);
 }
 
