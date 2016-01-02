@@ -1896,11 +1896,12 @@ config MSM_DEVFREQ_CPUBW
 	  agnostic interface to so that some of the devfreq governors can be
 	  shared across SoCs.
 
-config CPU_OVERCLOCK
+config MOTO_CPU_OVERCLOCK_DEFAULT
 	bool "enable CPU overclocking option"
+	depends on CONFIG_ARCH_MSM8226
 	default n
 	help
-	Enable CPU underclocking to 1.5ghz
+	Enable CPU underclocking to 1.5ghz for Motorola MSM8226 Devices
 
 config MSM_AVS_HW
 	bool "Enable Adaptive Voltage Scaling (AVS)"
