@@ -553,6 +553,9 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	mipi  = &pdata->panel_info.mipi;
 	mmi_panel_notify(MMI_PANEL_EVENT_PRE_DISPLAY_OFF, NULL);
 
+	if (ctrl->set_lbm)
+		ctrl->set_lbm(ctrl, 0);
+
 	if (ctrl->off_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
 
@@ -1101,6 +1104,62 @@ static void mdss_dsi_parse_dfps_config(struct device_node *pan_node,
 	return;
 }
 
+static int mdss_panel_parse_lbm(struct device_node *np,
+				struct mdss_panel_info *pinfo,
+				struct mdss_dsi_ctrl_pdata *ctrl_pdata)
+{
+	int rc;
+	const char *data;
+
+	pinfo->lbm_state = 0;
+	pinfo->lbm_feature_enabled = 0;
+
+	data = of_get_property(np, "qcom,mdss-dsi-lbm-on-command", NULL);
+	if (!data)
+		return 0;
+
+	rc = mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->lbm_on_cmds,
+				"qcom,mdss-dsi-lbm-on-command", NULL);
+	if (rc) {
+		pr_err("%s : Failed parsing LBM on commands, rc = %d\n",
+			__func__, rc);
+		return rc;
+	}
+
+	rc = mdss_dsi_parse_dcs_cmds(np, &ctrl_pdata->lbm_off_cmds,
+				"qcom,mdss-dsi-lbm-off-command", NULL);
+	if (rc) {
+		pr_err("%s : Failed parsing LBM off commands, rc = %d\n",
+			__func__, rc);
+		return rc;
+	}
+	pinfo->lbm_feature_enabled = 1;
+	return 0;
+}
+
+int mdss_dsi_panel_set_lbm(struct mdss_dsi_ctrl_pdata *ctrl, int state)
+{
+	if (!ctrl->panel_data.panel_info.lbm_feature_enabled) {
+		pr_debug("LBM is disabled, ignore request\n");
+		return 0;
+	}
+
+	if (ctrl->panel_data.panel_info.lbm_state == state) {
+		pr_debug("LBM already in request state %d\n",
+			state);
+		return 0;
+	}
+
+	if (state)
+		mdss_dsi_panel_cmds_send(ctrl, &ctrl->lbm_on_cmds);
+	else
+		mdss_dsi_panel_cmds_send(ctrl, &ctrl->lbm_off_cmds);
+
+	ctrl->panel_data.panel_info.lbm_state = state;
+
+	return 0;
+}
+
 static int mdss_panel_parse_dt(struct device_node *np,
 			struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
@@ -1425,6 +1484,11 @@ static int mdss_panel_parse_dt(struct device_node *np,
 				ctrl_pdata->dis_rst_seq,
 				&ctrl_pdata->dis_rst_seq_len);
 
+	if (mdss_panel_parse_lbm(np, pinfo, ctrl_pdata)) {
+		pr_err("Error parsing LBM\n");
+		goto error;
+	}
+
 	return 0;
 
 error:
@@ -1473,6 +1537,7 @@ int mdss_dsi_panel_init(struct device_node *node,
 	ctrl_pdata->panel_data.set_backlight = mdss_dsi_panel_bl_ctrl;
 	ctrl_pdata->switch_mode = mdss_dsi_panel_switch_mode;
 	ctrl_pdata->cont_splash_on = mdss_dsi_panel_cont_splash_on;
+	ctrl_pdata->set_lbm = mdss_dsi_panel_set_lbm;
 
 	return 0;
 }

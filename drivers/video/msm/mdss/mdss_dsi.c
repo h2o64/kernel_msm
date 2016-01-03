@@ -47,6 +47,15 @@ static int mdss_dsi_regulator_init(struct platform_device *pdev)
 			ctrl_pdata->power_data.num_vreg, 1);
 }
 
+static int mdss_dsi_hndl_enable_lbm(struct mdss_dsi_ctrl_pdata *ctrl,
+				int enable)
+{
+	int rc = 0;
+	if (ctrl->set_lbm)
+		rc = ctrl->set_lbm(ctrl, enable);
+	return rc;
+}
+
 static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata, int enable)
 {
 	int ret;
@@ -1045,6 +1054,10 @@ static int mdss_dsi_event_handler(struct mdss_panel_data *pdata,
 		if (ctrl_pdata->off_cmds.link_state == DSI_LP_MODE)
 			rc = mdss_dsi_blank(pdata);
 		rc = mdss_dsi_off(pdata);
+		break;
+	case MDSS_EVENT_ENABLE_LBM:
+		rc = mdss_dsi_hndl_enable_lbm(ctrl_pdata,
+					(int)(unsigned long) arg);
 		break;
 	case MDSS_EVENT_CONT_SPLASH_FINISH:
 		if (ctrl_pdata->off_cmds.link_state == DSI_LP_MODE)

@@ -250,6 +250,7 @@ struct mdss_dsi_ctrl_pdata {
 	int (*check_status) (struct mdss_dsi_ctrl_pdata *pdata);
 	int (*cmdlist_commit)(struct mdss_dsi_ctrl_pdata *ctrl, int from_mdp);
 	void (*switch_mode) (struct mdss_panel_data *pdata, int mode);
+	int (*set_lbm)(struct mdss_dsi_ctrl_pdata *ctrl, int state);
 	int (*cont_splash_on) (struct mdss_panel_data *pdata);
 	struct mdss_panel_data panel_data;
 	struct dss_module_power panel_vregs;
@@ -323,6 +324,9 @@ struct mdss_dsi_ctrl_pdata {
 	struct dsi_buf status_buf;
 	struct platform_device *pdev;
 	int status_mode;
+
+	struct dsi_panel_cmds lbm_on_cmds;
+	struct dsi_panel_cmds lbm_off_cmds;
 };
 
 struct dsi_status_data {
