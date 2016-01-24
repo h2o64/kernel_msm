@@ -1816,7 +1816,7 @@ static int msm_vdec_op_s_ctrl(struct v4l2_ctrl *ctrl)
 		if (ctrl->cluster[c]->is_new) {
 			rc = try_set_ctrl(inst, ctrl->cluster[c]);
 			if (rc) {
-				dprintk(VIDC_ERR, "Failed setting %x",
+				dprintk(VIDC_WARN, "Failed setting %x",
 						ctrl->cluster[c]->id);
 				break;
 			}
@@ -1825,7 +1825,7 @@ static int msm_vdec_op_s_ctrl(struct v4l2_ctrl *ctrl)
 
 failed_open_done:
 	if (rc)
-		dprintk(VIDC_ERR, "Failed to set hal property for framesize\n");
+		dprintk(VIDC_WARN, "Failed to set hal property for framesize\n");
 	return rc;
 }
 
